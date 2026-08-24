@@ -1,0 +1,44 @@
+type: custom:advanced-power-flow-card
+title: Energiefluss
+solar:
+  pv1:
+    name: PV1
+    power: sensor.goodwe_pv1_power
+    voltage: sensor.goodwe_pv1_voltage
+    current: sensor.goodwe_pv1_current
+  pv2:
+    name: PV2
+    power: sensor.goodwe_pv2_power
+    voltage: sensor.goodwe_pv2_voltage
+    current: sensor.goodwe_pv2_current
+  pv3:
+    name: PV3
+    power: sensor.goodwe_pv3_power
+    voltage: sensor.goodwe_pv3_voltage
+    current: sensor.goodwe_pv3_current
+
+battery1:
+  name: Batterie 1
+  power: sensor.battery_1_power
+  soc: sensor.battery_1_soc
+  positive_is_charging: true
+
+battery2:
+  name: Batterie 2
+  power: sensor.battery_2_power
+  soc: sensor.battery_2_soc
+  positive_is_charging: true
+
+grid:
+  power: sensor.grid_power
+  positive_is_import: true
+
+house:
+  name: Haus
+  power: sensor.house_power
+
+heat_pump:
+  name: Wärmepumpe
+  power: sensor.heatpump_power
+
+power_threshold: 5
