@@ -65,10 +65,19 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     house: raw.house && typeof raw.house === "object" ? raw.house : undefined,
     heat_pump: raw.heat_pump && typeof raw.heat_pump === "object" ? raw.heat_pump : undefined,
     consumers: Array.isArray(raw.consumers) ? raw.consumers : [],
+    daily: raw.daily && typeof raw.daily === "object" ? raw.daily : undefined,
     power_threshold:
       typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold)
         ? raw.power_threshold
-        : 5
+        : 5,
+    balance_warning_threshold:
+      typeof raw.balance_warning_threshold === "number" && Number.isFinite(raw.balance_warning_threshold)
+        ? raw.balance_warning_threshold
+        : 50,
+    text_size:
+      raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal"
+        ? raw.text_size
+        : "large"
   } as AdvancedPowerFlowCardConfig;
 }
 
@@ -156,6 +165,9 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
       daily_energy: "sensor.heatpump_daily_energy"
     },
     consumers: [],
-    power_threshold: 5
+    daily: {},
+    power_threshold: 5,
+    balance_warning_threshold: 50,
+    text_size: "large"
   };
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.4
+
+- Reworked the center node: it now shows total current supply instead of repeating PV power.
+- Added live energy-balance diagnostics. With a measured house-power entity the center reports residual balance and highlights deviations above the configurable warning threshold.
+- House nodes calculated from PV/grid/battery power now show a clear `Berechnet` badge.
+- Grid flow now uses a compact `Bezug` / `Einspeisung` / `Ruhe` badge.
+- Battery subtitles now state `Lädt`, `Entlädt` or `Ruhe` alongside SOC.
+- Added 20% and 80% reference marks to battery SOC bars.
+- Added `small`, `normal` and `large` typography modes; `large` is the new default for improved phone readability.
+- Added optional daily summary entities for PV energy, grid import, grid export and house energy.
+- Hovering a node on desktop now emphasizes its connected power-flow path and fades unrelated paths.
+- Idle/zero-power nodes are visually quieter.
+- Removed the layout hint below the diagram.
+
 ## 0.2.3
 
 - Added a graphical SOC fill bar to every battery node.

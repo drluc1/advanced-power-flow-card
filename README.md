@@ -2,7 +2,7 @@
 
 Home Assistant Lovelace card for flexible visualization of energy flows.
 
-## v0.2.3 highlights
+## v0.2.4 highlights
 
 - Any number of PV systems and MPPT/sub-PV inputs.
 - PV systems and MPPTs wrap into additional rows instead of widening the diagram.
@@ -16,6 +16,12 @@ Home Assistant Lovelace card for flexible visualization of energy flows.
 - Heat-pump node includes an operating-mode/status badge.
 - Active, idle and unavailable nodes are visually differentiated without hiding information.
 - v0.1 configurations are migrated automatically when loaded.
+- Center node shows total live supply rather than duplicating PV power.
+- Optional balance diagnostics warn when measured inputs/outputs do not close within the configured threshold.
+- Grid and calculated-house nodes use compact status badges; batteries explicitly show charging/discharging state.
+- Three typography sizes are available; `large` is the default for better mobile readability.
+- Optional daily energy summary for PV, import, export and house consumption.
+- Desktop hover highlights the connected energy path.
 
 ## Development
 
@@ -122,3 +128,32 @@ consumers:
 ```
 
 If `part_of_house` is true, the flow is drawn from the house node to the consumer so the consumer is visually represented as part of the already measured house consumption rather than as an additional total load.
+
+
+## Display and balance options
+
+```yaml
+text_size: large
+power_threshold: 5
+balance_warning_threshold: 50
+```
+
+`text_size` accepts `small`, `normal` or `large`.
+
+When a real `house.power` entity is configured, the card independently compares the measured house load against PV, grid, battery and direct-consumer power. If the residual exceeds `balance_warning_threshold`, the center node is highlighted as a warning.
+
+When `house.power` is omitted, the house load itself is derived from the same balance. In that case a residual cannot be used as an independent sensor check, so the card marks the house as calculated instead.
+
+## Optional daily summary
+
+Only configured entries are shown:
+
+```yaml
+daily:
+  pv_energy: sensor.pv_energy_today
+  grid_import_energy: sensor.grid_import_today
+  grid_export_energy: sensor.grid_export_today
+  house_energy: sensor.house_energy_today
+```
+
+The values appear as compact tiles above the live flow diagram and can be clicked to open the corresponding Home Assistant entity.

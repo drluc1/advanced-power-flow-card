@@ -1,6 +1,8 @@
 type: custom:advanced-power-flow-card
 title: Energiefluss
 power_threshold: 5
+balance_warning_threshold: 50
+text_size: large
 
 solar:
   - name: GoodWe
@@ -70,3 +72,11 @@ consumers:
   - name: Server
     power: sensor.server_power
     part_of_house: true
+
+
+# Optional: Tagesenergie-Werte im Kopf der Card
+daily:
+  pv_energy: sensor.pv_energy_today
+  grid_import_energy: sensor.grid_import_today
+  grid_export_energy: sensor.grid_export_today
+  house_energy: sensor.house_energy_today

@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.2.3";
+const CARD_VERSION = "0.2.4";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -34,6 +34,7 @@ interface DiagramNode {
   activity?: NodeActivity;
   batterySoc?: number;
   badge?: string;
+  warning?: boolean;
 }
 
 interface PvClusterLayout {
@@ -69,13 +70,15 @@ export class AdvancedPowerFlowCard extends LitElement {
   static properties = {
     hass: { attribute: false },
     _config: { state: true },
-    _heatExpanded: { state: true }
+    _heatExpanded: { state: true },
+    _hoveredNode: { state: true }
   };
 
   hass?: HomeAssistant;
   private _config: AdvancedPowerFlowCardConfig = createStubConfig();
   private _heatExpanded = false;
   private _heatExpansionInitialized = false;
+  private _hoveredNode?: string;
 
   static getConfigElement(): HTMLElement {
     return document.createElement("advanced-power-flow-card-editor");
@@ -326,6 +329,140 @@ export class AdvancedPowerFlowCard extends LitElement {
     return { value, calculated: true, complete: true };
   }
 
+
+  private _batteryStatus(config: BatteryConfig): string {
+    const p = this._powerW(config.power);
+    if (p === undefined) return "Status —";
+    if (Math.abs(p) <= this._threshold()) return "Ruhe";
+
+    const positiveCharging = config.positive_is_charging ?? true;
+    const charging = positiveCharging ? p > 0 : p < 0;
+    return charging ? "Lädt" : "Entlädt";
+  }
+
+  private _directConsumersPowerW(): { value?: number; complete: boolean } {
+    let total = 0;
+    const direct: ConsumerConfig[] = [
+      ...((this._config.consumers ?? []).filter((consumer) => !(consumer.part_of_house ?? true))),
+      ...(this._config.heat_pump && !(this._config.heat_pump.part_of_house ?? true)
+        ? [this._config.heat_pump]
+        : [])
+    ];
+
+    for (const consumer of direct) {
+      if (!consumer.power) return { complete: false };
+      const value = this._powerW(consumer.power);
+      if (value === undefined) return { complete: false };
+      total += Math.abs(value);
+    }
+
+    return { value: total, complete: true };
+  }
+
+  private _systemBalanceInfo(): {
+    source?: number;
+    sink?: number;
+    residual?: number;
+    complete: boolean;
+    calculatedHouse: boolean;
+    warning: boolean;
+  } {
+    const pv = this._totalPvW();
+    const grid = this._gridNetToHouseW();
+    const house = this._housePowerInfo();
+    const direct = this._directConsumersPowerW();
+
+    if (pv === undefined || grid === undefined || !house.complete || !direct.complete) {
+      return {
+        complete: false,
+        calculatedHouse: house.calculated,
+        warning: false
+      };
+    }
+
+    let batterySource = 0;
+    let batterySink = 0;
+    for (const battery of this._config.batteries ?? []) {
+      const value = this._batteryNetToHouseW(battery);
+      if (value === undefined) {
+        return {
+          complete: false,
+          calculatedHouse: house.calculated,
+          warning: false
+        };
+      }
+      batterySource += Math.max(0, value);
+      batterySink += Math.max(0, -value);
+    }
+
+    const source =
+      Math.max(0, pv) +
+      Math.max(0, grid) +
+      batterySource;
+
+    const sink =
+      Math.max(0, house.value ?? 0) +
+      Math.max(0, direct.value ?? 0) +
+      Math.max(0, -grid) +
+      batterySink;
+
+    const residual = source - sink;
+    const limit = Math.max(0, this._config.balance_warning_threshold ?? 50);
+
+    return {
+      source,
+      sink,
+      residual,
+      complete: true,
+      calculatedHouse: house.calculated,
+      warning: !house.calculated && Math.abs(residual) > limit
+    };
+  }
+
+  private _formatSignedW(value?: number): string {
+    if (value === undefined) return "—";
+    const sign = value > 0 ? "+" : value < 0 ? "−" : "±";
+    return `${sign}${this._formatW(Math.abs(value), true)}`;
+  }
+
+  private _formatEnergy(entityId?: string): string {
+    const value = this._number(entityId);
+    if (value === undefined) return "—";
+
+    const unit = this._unit(entityId).trim();
+    const normalized = unit.toLowerCase();
+    if (normalized === "wh" && Math.abs(value) >= 1000) {
+      return `${(value / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`;
+    }
+
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`;
+  }
+
+  private _dailyItems(): Array<{ label: string; value: string; entity: string }> {
+    const daily = this._config.daily;
+    if (!daily) return [];
+
+    const candidates: Array<[string, string | undefined]> = [
+      ["PV heute", daily.pv_energy],
+      ["Netzbezug", daily.grid_import_energy],
+      ["Einspeisung", daily.grid_export_energy],
+      ["Haus heute", daily.house_energy]
+    ];
+
+    return candidates
+      .filter((item): item is [string, string] => Boolean(item[1]))
+      .map(([label, entity]) => ({
+        label,
+        value: this._formatEnergy(entity),
+        entity
+      }));
+  }
+
+  private _flowFocusClass(relatedNodes: string[]): string {
+    if (!this._hoveredNode) return "";
+    return relatedNodes.includes(this._hoveredNode) ? "focus" : "dimmed";
+  }
+
   private _durationFromPower(power?: number): number {
     const p = Math.abs(power ?? 0);
     if (p <= this._threshold()) return 2.3;
@@ -448,31 +585,46 @@ export class AdvancedPowerFlowCard extends LitElement {
     if (!solar.length) pvY = 24;
 
     const centerY = pvY + 34;
+    const balance = this._systemBalanceInfo();
     const center: DiagramNode = {
       id: "center",
-      title: "Energie",
-      main: this._formatW(this._totalPvW(), true),
-      sub: "Zentraler Energiefluss",
+      title: "Versorgung",
+      main: balance.complete ? this._formatW(balance.source, true) : "—",
+      sub: balance.complete
+        ? (balance.calculatedHouse
+          ? "Haus aus Leistungsbilanz"
+          : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}`)
+        : "Bilanz unvollständig",
       kind: "center",
       x: width / 2 - 100,
       y: centerY,
       w: 200,
       h: 92,
-      activity: this._activityFromPower(this._totalPvW())
+      activity: balance.complete ? this._activityFromPower(balance.source) : "unknown",
+      warning: balance.warning
     };
 
     const grid: DiagramNode = {
       id: "grid",
       title: "Netz",
       main: this._formatPower(this._config.grid?.power, true),
-      sub: this._gridFlow() === "forward" ? "Bezug" : this._gridFlow() === "reverse" ? "Einspeisung" : "Ruhe",
+      sub: this._gridFlow() === "forward"
+        ? "Energie aus Netz"
+        : this._gridFlow() === "reverse"
+          ? "Energie ins Netz"
+          : "Kein Netzfluss",
       entity: this._config.grid?.power,
       kind: "grid",
       x: 50,
       y: centerY + 2,
       w: 190,
       h: 88,
-      activity: this._activityFromPower(this._powerW(this._config.grid?.power))
+      activity: this._activityFromPower(this._powerW(this._config.grid?.power)),
+      badge: this._gridFlow() === "forward"
+        ? "Bezug"
+        : this._gridFlow() === "reverse"
+          ? "Einspeisung"
+          : "Ruhe"
     };
 
     const houseInfo = this._housePowerInfo();
@@ -481,7 +633,7 @@ export class AdvancedPowerFlowCard extends LitElement {
       title: this._config.house?.name ?? "Haus",
       main: houseInfo.complete ? this._formatW(houseInfo.value, true) : "—",
       sub: houseInfo.calculated
-        ? (houseInfo.complete ? "Automatisch berechnet" : "Berechnung unvollständig")
+        ? (houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig")
         : (houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar"),
       entity: this._config.house?.power,
       kind: "house",
@@ -489,7 +641,10 @@ export class AdvancedPowerFlowCard extends LitElement {
       y: centerY + 2,
       w: 190,
       h: 88,
-      activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown"
+      activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown",
+      badge: houseInfo.calculated
+        ? (houseInfo.complete ? "Berechnet" : "Prüfen")
+        : undefined
     };
 
     const bottom: BottomNode[] = [];
@@ -509,7 +664,7 @@ export class AdvancedPowerFlowCard extends LitElement {
             id: `battery-${index}`,
             title: battery.name ?? `Batterie ${index + 1}`,
             main: this._formatPower(battery.power, true),
-            sub: this._formatSoc(battery.soc),
+            sub: `${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}`,
             entity: battery.power ?? battery.soc,
             kind: "battery",
             x,
@@ -648,14 +803,16 @@ export class AdvancedPowerFlowCard extends LitElement {
     d: string,
     direction: FlowDirection,
     power?: number,
-    key = ""
+    key = "",
+    relatedNodes: string[] = []
   ) {
     const duration = this._durationFromPower(power);
+    const focusClass = this._flowFocusClass(relatedNodes);
     return svg`
-      <path d=${d} class="flow-base"></path>
+      <path d=${d} class=${`flow-base ${focusClass}`}></path>
       <path
         d=${d}
-        class=${`flow ${direction}`}
+        class=${`flow ${direction} ${focusClass}`}
         style=${`--flow-duration:${duration}s`}
         pathLength="100"
         data-key=${key}
@@ -689,8 +846,10 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     return svg`
       <g
-        class=${`node ${node.kind} ${activity} ${clickable ? "clickable" : ""}`}
+        class=${`node ${node.kind} ${activity} ${node.warning ? "warning" : ""} ${clickable ? "clickable" : ""}`}
         @click=${() => this._handleNodeClick(node)}
+        @mouseenter=${() => { this._hoveredNode = node.id; }}
+        @mouseleave=${() => { this._hoveredNode = undefined; }}
       >
         <rect
           x=${node.x}
@@ -707,7 +866,7 @@ export class AdvancedPowerFlowCard extends LitElement {
         </text>
         ${node.badge
           ? svg`
-            <g class="status-badge">
+            <g class=${`status-badge ${node.badge.startsWith("⚠") ? "warning" : ""}`}>
               <rect
                 x=${node.x + node.w - Math.min(92, Math.max(52, node.badge.length * 7 + 20)) - 14}
                 y=${node.y + 10}
@@ -745,6 +904,20 @@ export class AdvancedPowerFlowCard extends LitElement {
               rx="2.25"
               class="battery-soc-fill"
             ></rect>
+            <line
+              x1=${socTrackX + socTrackW * 0.2}
+              y1=${socTrackY - 1.5}
+              x2=${socTrackX + socTrackW * 0.2}
+              y2=${socTrackY + 6}
+              class="battery-soc-mark"
+            ></line>
+            <line
+              x1=${socTrackX + socTrackW * 0.8}
+              y1=${socTrackY - 1.5}
+              x2=${socTrackX + socTrackW * 0.8}
+              y2=${socTrackY + 6}
+              class="battery-soc-mark"
+            ></line>
           `
           : nothing}
         ${node.heatPump
@@ -851,9 +1024,13 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     const layout = this._layout();
     const pvTotal = this._totalPvW();
+    const dailyItems = this._dailyItems();
+    const houseBranchIds = layout.bottom
+      .filter((item) => item.source === "house")
+      .map((item) => item.node.id);
 
     return html`
-      <ha-card>
+      <ha-card class=${`text-${this._config.text_size ?? "large"}`}>
         <div class="header">
           <div>
             <div class="title">${this._config.title ?? "Energiefluss"}</div>
@@ -865,6 +1042,19 @@ export class AdvancedPowerFlowCard extends LitElement {
           </div>
           <div class="version">v${CARD_VERSION}</div>
         </div>
+
+        ${dailyItems.length
+          ? html`
+            <div class="daily-summary">
+              ${dailyItems.map((item) => html`
+                <button class="daily-item" @click=${() => this._openMoreInfo(item.entity)}>
+                  <span>${item.label}</span>
+                  <strong>${item.value}</strong>
+                </button>
+              `)}
+            </div>
+          `
+          : nothing}
 
         <div class="diagram-fit">
           <svg
@@ -891,14 +1081,16 @@ export class AdvancedPowerFlowCard extends LitElement {
                     this._connectionPath(child, cluster.parent),
                     this._positiveFlow(power),
                     power,
-                    `pv-child-${cluster.systemIndex}-${childIndex}`
+                    `pv-child-${cluster.systemIndex}-${childIndex}`,
+                    [child.id, cluster.parent.id]
                   );
                 })}
                 ${this._flowPath(
                   this._connectionPath(cluster.parent, layout.center),
                   this._positiveFlow(systemPower),
                   systemPower,
-                  `pv-system-${cluster.systemIndex}`
+                  `pv-system-${cluster.systemIndex}`,
+                  [cluster.parent.id, layout.center.id, ...cluster.children.map((child) => child.id)]
                 )}
               `;
             })}
@@ -907,14 +1099,16 @@ export class AdvancedPowerFlowCard extends LitElement {
               this._horizontalPath(layout.grid, layout.center),
               this._gridFlow(),
               this._powerW(this._config.grid?.power),
-              "grid"
+              "grid",
+              [layout.grid.id, layout.center.id]
             )}
 
             ${this._flowPath(
               this._horizontalPath(layout.center, layout.house),
               this._positiveFlow(this._housePowerInfo().value),
               this._housePowerInfo().value,
-              "house"
+              "house",
+              [layout.center.id, layout.house.id, ...houseBranchIds]
             )}
 
             ${layout.bottom.map((item) => {
@@ -927,7 +1121,8 @@ export class AdvancedPowerFlowCard extends LitElement {
                 path,
                 direction,
                 item.numericPower ?? this._powerW(item.power),
-                item.node.id
+                item.node.id,
+                [source.id, item.node.id]
               );
             })}
 
@@ -945,7 +1140,6 @@ export class AdvancedPowerFlowCard extends LitElement {
         <div class="legend">
           <span><i class="dot active"></i> aktiver Energiefluss</span>
           <span><i class="dot idle"></i> kein relevanter Fluss</span>
-          <span class="hint">Layout passt sich automatisch an die Kartenbreite an.</span>
         </div>
 
         ${this._heatExpanded && this._config.heat_pump
@@ -971,6 +1165,33 @@ export class AdvancedPowerFlowCard extends LitElement {
     ha-card {
       overflow: hidden;
       padding: 20px;
+      --apfc-title-size: 24px;
+      --apfc-subtitle-size: 14px;
+      --apfc-node-title-size: 17px;
+      --apfc-node-icon-size: 19px;
+      --apfc-node-main-size: 24px;
+      --apfc-node-sub-size: 13.5px;
+      --apfc-badge-size: 11.5px;
+    }
+
+    ha-card.text-small {
+      --apfc-title-size: 22px;
+      --apfc-subtitle-size: 13px;
+      --apfc-node-title-size: 15.5px;
+      --apfc-node-icon-size: 17.5px;
+      --apfc-node-main-size: 22px;
+      --apfc-node-sub-size: 12.5px;
+      --apfc-badge-size: 10.5px;
+    }
+
+    ha-card.text-large {
+      --apfc-title-size: 25px;
+      --apfc-subtitle-size: 14.5px;
+      --apfc-node-title-size: 18.5px;
+      --apfc-node-icon-size: 20.5px;
+      --apfc-node-main-size: 25.5px;
+      --apfc-node-sub-size: 14.5px;
+      --apfc-badge-size: 12px;
     }
 
     .header {
@@ -982,7 +1203,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .title {
-      font-size: 24px;
+      font-size: var(--apfc-title-size);
       line-height: 1.2;
       font-weight: 700;
       color: var(--primary-text-color);
@@ -990,7 +1211,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     .subtitle {
       margin-top: 6px;
-      font-size: 14px;
+      font-size: var(--apfc-subtitle-size);
       color: var(--secondary-text-color);
     }
 
@@ -1000,6 +1221,44 @@ export class AdvancedPowerFlowCard extends LitElement {
     .version {
       font-size: 12px;
       color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+
+    .daily-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
+    .daily-item {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--divider-color);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--secondary-background-color) 58%, transparent);
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .daily-item:hover {
+      border-color: var(--primary-color);
+    }
+
+    .daily-item span {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+    }
+
+    .daily-item strong {
+      font-size: 14px;
+      color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
@@ -1044,6 +1303,20 @@ export class AdvancedPowerFlowCard extends LitElement {
     .flow.reverse { animation-direction: reverse; }
     .flow.off { opacity: 0; animation: none; }
 
+    .flow-base,
+    .flow {
+      transition: opacity 160ms ease, stroke-width 160ms ease, filter 160ms ease;
+    }
+
+    .flow-base.dimmed { opacity: .16; }
+    .flow.dimmed { opacity: .14; }
+    .flow-base.focus { opacity: 1; stroke-width: 8.5; }
+    .flow.focus {
+      opacity: 1;
+      stroke-width: 4.8;
+      filter: drop-shadow(0 0 3px color-mix(in srgb, var(--apfc-flow) 58%, transparent));
+    }
+
     @keyframes dash {
       to { stroke-dashoffset: -50; }
     }
@@ -1061,14 +1334,26 @@ export class AdvancedPowerFlowCard extends LitElement {
       filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--primary-color) 12%, transparent));
     }
 
+    .node.warning .node-bg {
+      stroke: var(--error-color, #db4437);
+      stroke-width: 2.2;
+      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--error-color, #db4437) 18%, transparent));
+    }
+
+    .node.warning .node-sub {
+      fill: var(--error-color, #db4437);
+      font-weight: 700;
+    }
+
     .node.idle .node-bg {
-      opacity: .72;
+      opacity: .58;
       filter: none;
     }
 
-    .node.idle .node-icon { opacity: .58; }
-    .node.idle .node-main { opacity: .82; }
-    .node.idle .node-sub { opacity: .75; }
+    .node.idle .node-icon { opacity: .46; }
+    .node.idle .node-main { opacity: .68; }
+    .node.idle .node-title { opacity: .72; }
+    .node.idle .node-sub { opacity: .58; }
 
     .node.unknown .node-bg {
       opacity: .56;
@@ -1126,24 +1411,24 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     .node-title {
       fill: var(--secondary-text-color);
-      font-size: 17px;
+      font-size: var(--apfc-node-title-size);
       font-weight: 650;
     }
 
     .node-icon {
       fill: var(--primary-color);
-      font-size: 19px;
+      font-size: var(--apfc-node-icon-size);
     }
 
     .node-main {
       fill: var(--primary-text-color);
-      font-size: 24px;
+      font-size: var(--apfc-node-main-size);
       font-weight: 750;
     }
 
     .node-sub {
       fill: var(--secondary-text-color);
-      font-size: 13.5px;
+      font-size: var(--apfc-node-sub-size);
     }
 
     .battery-soc-track {
@@ -1155,16 +1440,49 @@ export class AdvancedPowerFlowCard extends LitElement {
       filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 35%, transparent));
     }
 
+    .battery-soc-mark {
+      stroke: color-mix(in srgb, var(--primary-text-color) 34%, transparent);
+      stroke-width: 1;
+      pointer-events: none;
+    }
+
     .status-badge rect {
-      fill: color-mix(in srgb, var(--apfc-heat) 16%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--apfc-heat) 48%, var(--divider-color));
+      fill: color-mix(in srgb, var(--primary-color) 12%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--primary-color) 42%, var(--divider-color));
       stroke-width: 1;
     }
 
     .status-badge text {
-      fill: color-mix(in srgb, var(--apfc-heat) 78%, var(--primary-text-color));
-      font-size: 11.5px;
+      fill: color-mix(in srgb, var(--primary-color) 76%, var(--primary-text-color));
+      font-size: var(--apfc-badge-size);
       font-weight: 700;
+    }
+
+    .node.heat .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-heat) 16%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-heat) 48%, var(--divider-color));
+    }
+
+    .node.heat .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-heat) 78%, var(--primary-text-color));
+    }
+
+    .node.grid .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-grid) 14%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-grid) 46%, var(--divider-color));
+    }
+
+    .node.grid .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-grid) 78%, var(--primary-text-color));
+    }
+
+    .status-badge.warning rect {
+      fill: color-mix(in srgb, var(--error-color, #db4437) 15%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--error-color, #db4437) 55%, var(--divider-color));
+    }
+
+    .status-badge.warning text {
+      fill: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
     }
 
     .node.idle .status-badge,
@@ -1197,8 +1515,6 @@ export class AdvancedPowerFlowCard extends LitElement {
       align-items: center;
       gap: 6px;
     }
-
-    .legend .hint { margin-left: auto; opacity: .75; }
 
     .dot {
       width: 8px;
@@ -1271,11 +1587,14 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     @media (max-width: 700px) {
       ha-card { padding: 12px; }
-      .title { font-size: 22px; }
-      .subtitle { font-size: 13.5px; }
       .version { font-size: 11.5px; }
       .legend { font-size: 11.5px; gap: 10px; }
-      .legend .hint { display: none; }
+      .daily-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .daily-item { padding: 7px 8px; }
     }
 
     @media (prefers-reduced-motion: reduce) {

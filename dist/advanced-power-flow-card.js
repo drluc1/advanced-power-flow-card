@@ -629,7 +629,10 @@ function normalizeConfig(input) {
 		house: raw.house && typeof raw.house === "object" ? raw.house : void 0,
 		heat_pump: raw.heat_pump && typeof raw.heat_pump === "object" ? raw.heat_pump : void 0,
 		consumers: Array.isArray(raw.consumers) ? raw.consumers : [],
-		power_threshold: typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold) ? raw.power_threshold : 5
+		daily: raw.daily && typeof raw.daily === "object" ? raw.daily : void 0,
+		power_threshold: typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold) ? raw.power_threshold : 5,
+		balance_warning_threshold: typeof raw.balance_warning_threshold === "number" && Number.isFinite(raw.balance_warning_threshold) ? raw.balance_warning_threshold : 50,
+		text_size: raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" ? raw.text_size : "large"
 	};
 }
 function createStubConfig() {
@@ -705,7 +708,10 @@ function createStubConfig() {
 			daily_energy: "sensor.heatpump_daily_energy"
 		},
 		consumers: [],
-		power_threshold: 5
+		daily: {},
+		power_threshold: 5,
+		balance_warning_threshold: 50,
+		text_size: "large"
 	};
 }
 //#endregion
@@ -779,6 +785,21 @@ var AdvancedPowerFlowCardEditor = class extends i {
       />
     `;
 	}
+	_selectInput(label, value, options, onChange) {
+		return b`
+      <label>${label}</label>
+      <select
+        .value=${value ?? options[0]?.value ?? ""}
+        @change=${(event) => onChange(event.target.value)}
+      >
+        ${options.map((option) => b`
+          <option value=${option.value} ?selected=${(value ?? options[0]?.value) === option.value}>
+            ${option.label}
+          </option>
+        `)}
+      </select>
+    `;
+	}
 	_checkbox(label, value, fallback, onChange) {
 		return b`
       <label class="check">
@@ -850,6 +871,25 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		}))}
           ${this._numberInput("Animationsschwelle in W", this._config.power_threshold, 5, (value) => this._with((config) => {
 			config.power_threshold = value;
+		}))}
+          ${this._numberInput("Bilanz-Warnschwelle in W", this._config.balance_warning_threshold, 50, (value) => this._with((config) => {
+			config.balance_warning_threshold = value;
+		}))}
+          ${this._selectInput("Schriftgröße", this._config.text_size, [
+			{
+				value: "small",
+				label: "Klein"
+			},
+			{
+				value: "normal",
+				label: "Normal"
+			},
+			{
+				value: "large",
+				label: "Groß"
+			}
+		], (value) => this._with((config) => {
+			config.text_size = value;
 		}))}
         </section>
 
@@ -997,6 +1037,40 @@ var AdvancedPowerFlowCardEditor = class extends i {
           </div>
         </section>
 
+
+        <section>
+          <div class="section-title"><h3>Tageswerte (optional)</h3></div>
+          <div class="form-grid full">
+            ${this._entityPicker("PV-Energie heute", this._config.daily?.pv_energy, (value) => this._with((config) => {
+			config.daily = {
+				...config.daily,
+				pv_energy: value
+			};
+		}))}
+            ${this._entityPicker("Netzbezug heute", this._config.daily?.grid_import_energy, (value) => this._with((config) => {
+			config.daily = {
+				...config.daily,
+				grid_import_energy: value
+			};
+		}))}
+            ${this._entityPicker("Einspeisung heute", this._config.daily?.grid_export_energy, (value) => this._with((config) => {
+			config.daily = {
+				...config.daily,
+				grid_export_energy: value
+			};
+		}))}
+            ${this._entityPicker("Hausverbrauch heute", this._config.daily?.house_energy, (value) => this._with((config) => {
+			config.daily = {
+				...config.daily,
+				house_energy: value
+			};
+		}))}
+            <div class="help">
+              Nur konfigurierte Tageswerte werden über dem Flussdiagramm angezeigt.
+            </div>
+          </div>
+        </section>
+
         <section>
           <div class="section-title"><h3>Wärmepumpe</h3></div>
           <div class="form-grid full">
@@ -1087,7 +1161,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
       line-height: 1.45;
       color: var(--secondary-text-color);
     }
-    input[type="text"], input[type="number"] {
+    input[type="text"], input[type="number"], select {
       box-sizing: border-box;
       width: 100%;
       min-height: 42px;
@@ -1144,7 +1218,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.3";
+var CARD_VERSION = "0.2.4";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1156,7 +1230,8 @@ var AdvancedPowerFlowCard = class extends i {
 		this.properties = {
 			hass: { attribute: false },
 			_config: { state: true },
-			_heatExpanded: { state: true }
+			_heatExpanded: { state: true },
+			_hoveredNode: { state: true }
 		};
 	}
 	static getConfigElement() {
@@ -1344,6 +1419,90 @@ var AdvancedPowerFlowCard = class extends i {
 			complete: true
 		};
 	}
+	_batteryStatus(config) {
+		const p = this._powerW(config.power);
+		if (p === void 0) return "Status —";
+		if (Math.abs(p) <= this._threshold()) return "Ruhe";
+		return (config.positive_is_charging ?? true ? p > 0 : p < 0) ? "Lädt" : "Entlädt";
+	}
+	_directConsumersPowerW() {
+		let total = 0;
+		const direct = [...(this._config.consumers ?? []).filter((consumer) => !(consumer.part_of_house ?? true)), ...this._config.heat_pump && !(this._config.heat_pump.part_of_house ?? true) ? [this._config.heat_pump] : []];
+		for (const consumer of direct) {
+			if (!consumer.power) return { complete: false };
+			const value = this._powerW(consumer.power);
+			if (value === void 0) return { complete: false };
+			total += Math.abs(value);
+		}
+		return {
+			value: total,
+			complete: true
+		};
+	}
+	_systemBalanceInfo() {
+		const pv = this._totalPvW();
+		const grid = this._gridNetToHouseW();
+		const house = this._housePowerInfo();
+		const direct = this._directConsumersPowerW();
+		if (pv === void 0 || grid === void 0 || !house.complete || !direct.complete) return {
+			complete: false,
+			calculatedHouse: house.calculated,
+			warning: false
+		};
+		let batterySource = 0;
+		let batterySink = 0;
+		for (const battery of this._config.batteries ?? []) {
+			const value = this._batteryNetToHouseW(battery);
+			if (value === void 0) return {
+				complete: false,
+				calculatedHouse: house.calculated,
+				warning: false
+			};
+			batterySource += Math.max(0, value);
+			batterySink += Math.max(0, -value);
+		}
+		const source = Math.max(0, pv) + Math.max(0, grid) + batterySource;
+		const sink = Math.max(0, house.value ?? 0) + Math.max(0, direct.value ?? 0) + Math.max(0, -grid) + batterySink;
+		const residual = source - sink;
+		const limit = Math.max(0, this._config.balance_warning_threshold ?? 50);
+		return {
+			source,
+			sink,
+			residual,
+			complete: true,
+			calculatedHouse: house.calculated,
+			warning: !house.calculated && Math.abs(residual) > limit
+		};
+	}
+	_formatSignedW(value) {
+		if (value === void 0) return "—";
+		return `${value > 0 ? "+" : value < 0 ? "−" : "±"}${this._formatW(Math.abs(value), true)}`;
+	}
+	_formatEnergy(entityId) {
+		const value = this._number(entityId);
+		if (value === void 0) return "—";
+		const unit = this._unit(entityId).trim();
+		if (unit.toLowerCase() === "wh" && Math.abs(value) >= 1e3) return `${(value / 1e3).toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh`;
+		return `${value.toLocaleString(void 0, { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`;
+	}
+	_dailyItems() {
+		const daily = this._config.daily;
+		if (!daily) return [];
+		return [
+			["PV heute", daily.pv_energy],
+			["Netzbezug", daily.grid_import_energy],
+			["Einspeisung", daily.grid_export_energy],
+			["Haus heute", daily.house_energy]
+		].filter((item) => Boolean(item[1])).map(([label, entity]) => ({
+			label,
+			value: this._formatEnergy(entity),
+			entity
+		}));
+	}
+	_flowFocusClass(relatedNodes) {
+		if (!this._hoveredNode) return "";
+		return relatedNodes.includes(this._hoveredNode) ? "focus" : "dimmed";
+	}
 	_durationFromPower(power) {
 		const p = Math.abs(power ?? 0);
 		if (p <= this._threshold()) return 2.3;
@@ -1435,44 +1594,48 @@ var AdvancedPowerFlowCard = class extends i {
 		}
 		if (!solar.length) pvY = 24;
 		const centerY = pvY + 34;
+		const balance = this._systemBalanceInfo();
 		const center = {
 			id: "center",
-			title: "Energie",
-			main: this._formatW(this._totalPvW(), true),
-			sub: "Zentraler Energiefluss",
+			title: "Versorgung",
+			main: balance.complete ? this._formatW(balance.source, true) : "—",
+			sub: balance.complete ? balance.calculatedHouse ? "Haus aus Leistungsbilanz" : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}` : "Bilanz unvollständig",
 			kind: "center",
 			x: width / 2 - 100,
 			y: centerY,
 			w: 200,
 			h: 92,
-			activity: this._activityFromPower(this._totalPvW())
+			activity: balance.complete ? this._activityFromPower(balance.source) : "unknown",
+			warning: balance.warning
 		};
 		const grid = {
 			id: "grid",
 			title: "Netz",
 			main: this._formatPower(this._config.grid?.power, true),
-			sub: this._gridFlow() === "forward" ? "Bezug" : this._gridFlow() === "reverse" ? "Einspeisung" : "Ruhe",
+			sub: this._gridFlow() === "forward" ? "Energie aus Netz" : this._gridFlow() === "reverse" ? "Energie ins Netz" : "Kein Netzfluss",
 			entity: this._config.grid?.power,
 			kind: "grid",
 			x: 50,
 			y: centerY + 2,
 			w: 190,
 			h: 88,
-			activity: this._activityFromPower(this._powerW(this._config.grid?.power))
+			activity: this._activityFromPower(this._powerW(this._config.grid?.power)),
+			badge: this._gridFlow() === "forward" ? "Bezug" : this._gridFlow() === "reverse" ? "Einspeisung" : "Ruhe"
 		};
 		const houseInfo = this._housePowerInfo();
 		const house = {
 			id: "house",
 			title: this._config.house?.name ?? "Haus",
 			main: houseInfo.complete ? this._formatW(houseInfo.value, true) : "—",
-			sub: houseInfo.calculated ? houseInfo.complete ? "Automatisch berechnet" : "Berechnung unvollständig" : houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar",
+			sub: houseInfo.calculated ? houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig" : houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar",
 			entity: this._config.house?.power,
 			kind: "house",
 			x: 760,
 			y: centerY + 2,
 			w: 190,
 			h: 88,
-			activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown"
+			activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown",
+			badge: houseInfo.calculated ? houseInfo.complete ? "Berechnet" : "Prüfen" : void 0
 		};
 		const bottom = [];
 		const bottomSpecs = [];
@@ -1487,7 +1650,7 @@ var AdvancedPowerFlowCard = class extends i {
 						id: `battery-${index}`,
 						title: battery.name ?? `Batterie ${index + 1}`,
 						main: this._formatPower(battery.power, true),
-						sub: this._formatSoc(battery.soc),
+						sub: `${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}`,
 						entity: battery.power ?? battery.soc,
 						kind: "battery",
 						x,
@@ -1611,13 +1774,14 @@ var AdvancedPowerFlowCard = class extends i {
 		if (cop !== void 0) parts.push(`COP ${cop.toLocaleString(void 0, { maximumFractionDigits: 1 })}`);
 		return parts.length ? parts.join(" · ") : "Details anzeigen";
 	}
-	_flowPath(d, direction, power, key = "") {
+	_flowPath(d, direction, power, key = "", relatedNodes = []) {
 		const duration = this._durationFromPower(power);
+		const focusClass = this._flowFocusClass(relatedNodes);
 		return w`
-      <path d=${d} class="flow-base"></path>
+      <path d=${d} class=${`flow-base ${focusClass}`}></path>
       <path
         d=${d}
-        class=${`flow ${direction}`}
+        class=${`flow ${direction} ${focusClass}`}
         style=${`--flow-duration:${duration}s`}
         pathLength="100"
         data-key=${key}
@@ -1646,8 +1810,14 @@ var AdvancedPowerFlowCard = class extends i {
 		const socFillW = node.batterySoc === void 0 ? 0 : socTrackW * node.batterySoc / 100;
 		return w`
       <g
-        class=${`node ${node.kind} ${activity} ${clickable ? "clickable" : ""}`}
+        class=${`node ${node.kind} ${activity} ${node.warning ? "warning" : ""} ${clickable ? "clickable" : ""}`}
         @click=${() => this._handleNodeClick(node)}
+        @mouseenter=${() => {
+			this._hoveredNode = node.id;
+		}}
+        @mouseleave=${() => {
+			this._hoveredNode = void 0;
+		}}
       >
         <rect
           x=${node.x}
@@ -1663,7 +1833,7 @@ var AdvancedPowerFlowCard = class extends i {
           <tspan dx="8">${this._short(node.title, node.badge ? 20 : 28)}</tspan>
         </text>
         ${node.badge ? w`
-            <g class="status-badge">
+            <g class=${`status-badge ${node.badge.startsWith("⚠") ? "warning" : ""}`}>
               <rect
                 x=${node.x + node.w - Math.min(92, Math.max(52, node.badge.length * 7 + 20)) - 14}
                 y=${node.y + 10}
@@ -1697,6 +1867,20 @@ var AdvancedPowerFlowCard = class extends i {
               rx="2.25"
               class="battery-soc-fill"
             ></rect>
+            <line
+              x1=${socTrackX + socTrackW * .2}
+              y1=${socTrackY - 1.5}
+              x2=${socTrackX + socTrackW * .2}
+              y2=${socTrackY + 6}
+              class="battery-soc-mark"
+            ></line>
+            <line
+              x1=${socTrackX + socTrackW * .8}
+              y1=${socTrackY - 1.5}
+              x2=${socTrackX + socTrackW * .8}
+              y2=${socTrackY + 6}
+              class="battery-soc-mark"
+            ></line>
           ` : A}
         ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : A}
       </g>
@@ -1791,8 +1975,10 @@ var AdvancedPowerFlowCard = class extends i {
 		if (!this.hass) return A;
 		const layout = this._layout();
 		const pvTotal = this._totalPvW();
+		const dailyItems = this._dailyItems();
+		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
-      <ha-card>
+      <ha-card class=${`text-${this._config.text_size ?? "large"}`}>
         <div class="header">
           <div>
             <div class="title">${this._config.title ?? "Energiefluss"}</div>
@@ -1804,6 +1990,17 @@ var AdvancedPowerFlowCard = class extends i {
           </div>
           <div class="version">v${CARD_VERSION}</div>
         </div>
+
+        ${dailyItems.length ? b`
+            <div class="daily-summary">
+              ${dailyItems.map((item) => b`
+                <button class="daily-item" @click=${() => this._openMoreInfo(item.entity)}>
+                  <span>${item.label}</span>
+                  <strong>${item.value}</strong>
+                </button>
+              `)}
+            </div>
+          ` : A}
 
         <div class="diagram-fit">
           <svg
@@ -1826,21 +2023,29 @@ var AdvancedPowerFlowCard = class extends i {
                 ></rect>
                 ${cluster.children.map((child, childIndex) => {
 				const power = this._powerW(cluster.system.children?.[childIndex]?.power);
-				return this._flowPath(this._connectionPath(child, cluster.parent), this._positiveFlow(power), power, `pv-child-${cluster.systemIndex}-${childIndex}`);
+				return this._flowPath(this._connectionPath(child, cluster.parent), this._positiveFlow(power), power, `pv-child-${cluster.systemIndex}-${childIndex}`, [child.id, cluster.parent.id]);
 			})}
-                ${this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower, `pv-system-${cluster.systemIndex}`)}
+                ${this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower, `pv-system-${cluster.systemIndex}`, [
+				cluster.parent.id,
+				layout.center.id,
+				...cluster.children.map((child) => child.id)
+			])}
               `;
 		})}
 
-            ${this._flowPath(this._horizontalPath(layout.grid, layout.center), this._gridFlow(), this._powerW(this._config.grid?.power), "grid")}
+            ${this._flowPath(this._horizontalPath(layout.grid, layout.center), this._gridFlow(), this._powerW(this._config.grid?.power), "grid", [layout.grid.id, layout.center.id])}
 
-            ${this._flowPath(this._horizontalPath(layout.center, layout.house), this._positiveFlow(this._housePowerInfo().value), this._housePowerInfo().value, "house")}
+            ${this._flowPath(this._horizontalPath(layout.center, layout.house), this._positiveFlow(this._housePowerInfo().value), this._housePowerInfo().value, "house", [
+			layout.center.id,
+			layout.house.id,
+			...houseBranchIds
+		])}
 
             ${layout.bottom.map((item) => {
 			const source = item.source === "house" ? layout.house : layout.center;
 			const path = this._connectionPath(source, item.node);
 			const direction = item.source === "house" ? item.direction : item.direction;
-			return this._flowPath(path, direction, item.numericPower ?? this._powerW(item.power), item.node.id);
+			return this._flowPath(path, direction, item.numericPower ?? this._powerW(item.power), item.node.id, [source.id, item.node.id]);
 		})}
 
             ${layout.pvClusters.map((cluster) => w`
@@ -1857,7 +2062,6 @@ var AdvancedPowerFlowCard = class extends i {
         <div class="legend">
           <span><i class="dot active"></i> aktiver Energiefluss</span>
           <span><i class="dot idle"></i> kein relevanter Fluss</span>
-          <span class="hint">Layout passt sich automatisch an die Kartenbreite an.</span>
         </div>
 
         ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : A}
@@ -1881,6 +2085,33 @@ var AdvancedPowerFlowCard = class extends i {
     ha-card {
       overflow: hidden;
       padding: 20px;
+      --apfc-title-size: 24px;
+      --apfc-subtitle-size: 14px;
+      --apfc-node-title-size: 17px;
+      --apfc-node-icon-size: 19px;
+      --apfc-node-main-size: 24px;
+      --apfc-node-sub-size: 13.5px;
+      --apfc-badge-size: 11.5px;
+    }
+
+    ha-card.text-small {
+      --apfc-title-size: 22px;
+      --apfc-subtitle-size: 13px;
+      --apfc-node-title-size: 15.5px;
+      --apfc-node-icon-size: 17.5px;
+      --apfc-node-main-size: 22px;
+      --apfc-node-sub-size: 12.5px;
+      --apfc-badge-size: 10.5px;
+    }
+
+    ha-card.text-large {
+      --apfc-title-size: 25px;
+      --apfc-subtitle-size: 14.5px;
+      --apfc-node-title-size: 18.5px;
+      --apfc-node-icon-size: 20.5px;
+      --apfc-node-main-size: 25.5px;
+      --apfc-node-sub-size: 14.5px;
+      --apfc-badge-size: 12px;
     }
 
     .header {
@@ -1892,7 +2123,7 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .title {
-      font-size: 24px;
+      font-size: var(--apfc-title-size);
       line-height: 1.2;
       font-weight: 700;
       color: var(--primary-text-color);
@@ -1900,7 +2131,7 @@ var AdvancedPowerFlowCard = class extends i {
 
     .subtitle {
       margin-top: 6px;
-      font-size: 14px;
+      font-size: var(--apfc-subtitle-size);
       color: var(--secondary-text-color);
     }
 
@@ -1910,6 +2141,44 @@ var AdvancedPowerFlowCard = class extends i {
     .version {
       font-size: 12px;
       color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+
+    .daily-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
+    .daily-item {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--divider-color);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--secondary-background-color) 58%, transparent);
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .daily-item:hover {
+      border-color: var(--primary-color);
+    }
+
+    .daily-item span {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+    }
+
+    .daily-item strong {
+      font-size: 14px;
+      color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
@@ -1954,6 +2223,20 @@ var AdvancedPowerFlowCard = class extends i {
     .flow.reverse { animation-direction: reverse; }
     .flow.off { opacity: 0; animation: none; }
 
+    .flow-base,
+    .flow {
+      transition: opacity 160ms ease, stroke-width 160ms ease, filter 160ms ease;
+    }
+
+    .flow-base.dimmed { opacity: .16; }
+    .flow.dimmed { opacity: .14; }
+    .flow-base.focus { opacity: 1; stroke-width: 8.5; }
+    .flow.focus {
+      opacity: 1;
+      stroke-width: 4.8;
+      filter: drop-shadow(0 0 3px color-mix(in srgb, var(--apfc-flow) 58%, transparent));
+    }
+
     @keyframes dash {
       to { stroke-dashoffset: -50; }
     }
@@ -1971,14 +2254,26 @@ var AdvancedPowerFlowCard = class extends i {
       filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--primary-color) 12%, transparent));
     }
 
+    .node.warning .node-bg {
+      stroke: var(--error-color, #db4437);
+      stroke-width: 2.2;
+      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--error-color, #db4437) 18%, transparent));
+    }
+
+    .node.warning .node-sub {
+      fill: var(--error-color, #db4437);
+      font-weight: 700;
+    }
+
     .node.idle .node-bg {
-      opacity: .72;
+      opacity: .58;
       filter: none;
     }
 
-    .node.idle .node-icon { opacity: .58; }
-    .node.idle .node-main { opacity: .82; }
-    .node.idle .node-sub { opacity: .75; }
+    .node.idle .node-icon { opacity: .46; }
+    .node.idle .node-main { opacity: .68; }
+    .node.idle .node-title { opacity: .72; }
+    .node.idle .node-sub { opacity: .58; }
 
     .node.unknown .node-bg {
       opacity: .56;
@@ -2036,24 +2331,24 @@ var AdvancedPowerFlowCard = class extends i {
 
     .node-title {
       fill: var(--secondary-text-color);
-      font-size: 17px;
+      font-size: var(--apfc-node-title-size);
       font-weight: 650;
     }
 
     .node-icon {
       fill: var(--primary-color);
-      font-size: 19px;
+      font-size: var(--apfc-node-icon-size);
     }
 
     .node-main {
       fill: var(--primary-text-color);
-      font-size: 24px;
+      font-size: var(--apfc-node-main-size);
       font-weight: 750;
     }
 
     .node-sub {
       fill: var(--secondary-text-color);
-      font-size: 13.5px;
+      font-size: var(--apfc-node-sub-size);
     }
 
     .battery-soc-track {
@@ -2065,16 +2360,49 @@ var AdvancedPowerFlowCard = class extends i {
       filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 35%, transparent));
     }
 
+    .battery-soc-mark {
+      stroke: color-mix(in srgb, var(--primary-text-color) 34%, transparent);
+      stroke-width: 1;
+      pointer-events: none;
+    }
+
     .status-badge rect {
-      fill: color-mix(in srgb, var(--apfc-heat) 16%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--apfc-heat) 48%, var(--divider-color));
+      fill: color-mix(in srgb, var(--primary-color) 12%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--primary-color) 42%, var(--divider-color));
       stroke-width: 1;
     }
 
     .status-badge text {
-      fill: color-mix(in srgb, var(--apfc-heat) 78%, var(--primary-text-color));
-      font-size: 11.5px;
+      fill: color-mix(in srgb, var(--primary-color) 76%, var(--primary-text-color));
+      font-size: var(--apfc-badge-size);
       font-weight: 700;
+    }
+
+    .node.heat .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-heat) 16%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-heat) 48%, var(--divider-color));
+    }
+
+    .node.heat .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-heat) 78%, var(--primary-text-color));
+    }
+
+    .node.grid .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-grid) 14%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-grid) 46%, var(--divider-color));
+    }
+
+    .node.grid .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-grid) 78%, var(--primary-text-color));
+    }
+
+    .status-badge.warning rect {
+      fill: color-mix(in srgb, var(--error-color, #db4437) 15%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--error-color, #db4437) 55%, var(--divider-color));
+    }
+
+    .status-badge.warning text {
+      fill: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
     }
 
     .node.idle .status-badge,
@@ -2107,8 +2435,6 @@ var AdvancedPowerFlowCard = class extends i {
       align-items: center;
       gap: 6px;
     }
-
-    .legend .hint { margin-left: auto; opacity: .75; }
 
     .dot {
       width: 8px;
@@ -2181,11 +2507,14 @@ var AdvancedPowerFlowCard = class extends i {
 
     @media (max-width: 700px) {
       ha-card { padding: 12px; }
-      .title { font-size: 22px; }
-      .subtitle { font-size: 13.5px; }
       .version { font-size: 11.5px; }
       .legend { font-size: 11.5px; gap: 10px; }
-      .legend .hint { display: none; }
+      .daily-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .daily-item { padding: 7px 8px; }
     }
 
     @media (prefers-reduced-motion: reduce) {

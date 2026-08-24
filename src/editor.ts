@@ -100,6 +100,28 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     `;
   }
 
+  private _selectInput(
+    label: string,
+    value: string | undefined,
+    options: Array<{ value: string; label: string }>,
+    onChange: (value: string) => void
+  ) {
+    return html`
+      <label>${label}</label>
+      <select
+        .value=${value ?? options[0]?.value ?? ""}
+        @change=${(event: Event) =>
+          onChange((event.target as HTMLSelectElement).value)}
+      >
+        ${options.map((option) => html`
+          <option value=${option.value} ?selected=${(value ?? options[0]?.value) === option.value}>
+            ${option.label}
+          </option>
+        `)}
+      </select>
+    `;
+  }
+
   private _checkbox(
     label: string,
     value: boolean | undefined,
@@ -179,6 +201,24 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             this._config.power_threshold,
             5,
             (value) => this._with((config) => { config.power_threshold = value; })
+          )}
+          ${this._numberInput(
+            "Bilanz-Warnschwelle in W",
+            this._config.balance_warning_threshold,
+            50,
+            (value) => this._with((config) => { config.balance_warning_threshold = value; })
+          )}
+          ${this._selectInput(
+            "Schriftgröße",
+            this._config.text_size,
+            [
+              { value: "small", label: "Klein" },
+              { value: "normal", label: "Normal" },
+              { value: "large", label: "Groß" }
+            ],
+            (value) => this._with((config) => {
+              config.text_size = value as "small" | "normal" | "large";
+            })
           )}
         </section>
 
@@ -378,6 +418,44 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
           </div>
         </section>
 
+
+        <section>
+          <div class="section-title"><h3>Tageswerte (optional)</h3></div>
+          <div class="form-grid full">
+            ${this._entityPicker(
+              "PV-Energie heute",
+              this._config.daily?.pv_energy,
+              (value) => this._with((config) => {
+                config.daily = { ...config.daily, pv_energy: value };
+              })
+            )}
+            ${this._entityPicker(
+              "Netzbezug heute",
+              this._config.daily?.grid_import_energy,
+              (value) => this._with((config) => {
+                config.daily = { ...config.daily, grid_import_energy: value };
+              })
+            )}
+            ${this._entityPicker(
+              "Einspeisung heute",
+              this._config.daily?.grid_export_energy,
+              (value) => this._with((config) => {
+                config.daily = { ...config.daily, grid_export_energy: value };
+              })
+            )}
+            ${this._entityPicker(
+              "Hausverbrauch heute",
+              this._config.daily?.house_energy,
+              (value) => this._with((config) => {
+                config.daily = { ...config.daily, house_energy: value };
+              })
+            )}
+            <div class="help">
+              Nur konfigurierte Tageswerte werden über dem Flussdiagramm angezeigt.
+            </div>
+          </div>
+        </section>
+
         <section>
           <div class="section-title"><h3>Wärmepumpe</h3></div>
           <div class="form-grid full">
@@ -468,7 +546,7 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
       line-height: 1.45;
       color: var(--secondary-text-color);
     }
-    input[type="text"], input[type="number"] {
+    input[type="text"], input[type="number"], select {
       box-sizing: border-box;
       width: 100%;
       min-height: 42px;

@@ -39,6 +39,15 @@ export interface ConsumerConfig {
   part_of_house?: boolean;
 }
 
+export interface DailyStatsConfig {
+  pv_energy?: string;
+  grid_import_energy?: string;
+  grid_export_energy?: string;
+  house_energy?: string;
+}
+
+export type TextSize = "small" | "normal" | "large";
+
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
   return_temperature?: string;
@@ -64,7 +73,10 @@ export interface AdvancedPowerFlowCardConfig {
   house?: ConsumerConfig;
   heat_pump?: HeatPumpConfig;
   consumers?: ConsumerConfig[];
+  daily?: DailyStatsConfig;
   power_threshold?: number;
+  balance_warning_threshold?: number;
+  text_size?: TextSize;
 }
 
 declare global {

@@ -1,6 +1,6 @@
 {
   "name": "advanced-power-flow-card",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Flexible Home Assistant power flow card with dynamic PV systems, batteries and consumers.",
   "type": "module",
   "scripts": {
