@@ -2,7 +2,7 @@
 
 Home Assistant Lovelace card for flexible visualization of energy flows.
 
-## v0.2.1 highlights
+## v0.2.3 highlights
 
 - Any number of PV systems and MPPT/sub-PV inputs.
 - PV systems and MPPTs wrap into additional rows instead of widening the diagram.
@@ -12,6 +12,9 @@ Home Assistant Lovelace card for flexible visualization of energy flows.
 - Dedicated heat-pump node with expandable operating details.
 - House consumption can be calculated automatically from PV, grid and battery power when no house-power entity is configured.
 - Graphical editor supports adding/removing PV systems, MPPTs, batteries and consumers.
+- Battery nodes include a proportional SOC fill bar.
+- Heat-pump node includes an operating-mode/status badge.
+- Active, idle and unavailable nodes are visually differentiated without hiding information.
 - v0.1 configurations are migrated automatically when loaded.
 
 ## Development

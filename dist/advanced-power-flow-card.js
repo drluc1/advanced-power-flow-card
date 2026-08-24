@@ -1144,7 +1144,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.2";
+var CARD_VERSION = "0.2.3";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1245,6 +1245,14 @@ var AdvancedPowerFlowCard = class extends i {
 	}
 	_threshold() {
 		return Math.max(0, this._config.power_threshold ?? 5);
+	}
+	_activityFromPower(power) {
+		if (power === void 0) return "unknown";
+		return Math.abs(power) > this._threshold() ? "active" : "idle";
+	}
+	_clampPercent(value) {
+		if (value === void 0 || !Number.isFinite(value)) return void 0;
+		return Math.min(100, Math.max(0, value));
 	}
 	_positiveFlow(power) {
 		if (power === void 0 || Math.abs(power) <= this._threshold()) return "off";
@@ -1389,7 +1397,8 @@ var AdvancedPowerFlowCard = class extends i {
 					x: parentX,
 					y: parentY,
 					w: parentW,
-					h: parentH
+					h: parentH,
+					activity: this._activityFromPower(parentPower)
 				};
 				const childNodes = children.map((child, childIndex) => {
 					const row = Math.floor(childIndex / childColumns);
@@ -1407,7 +1416,8 @@ var AdvancedPowerFlowCard = class extends i {
 						x: rowStartX + col * (childW + childGapX),
 						y: pvY + clusterPadY + row * 88,
 						w: childW,
-						h: childH
+						h: childH,
+						activity: this._activityFromPower(this._powerW(child.power))
 					};
 				});
 				pvClusters.push({
@@ -1434,7 +1444,8 @@ var AdvancedPowerFlowCard = class extends i {
 			x: width / 2 - 100,
 			y: centerY,
 			w: 200,
-			h: 92
+			h: 92,
+			activity: this._activityFromPower(this._totalPvW())
 		};
 		const grid = {
 			id: "grid",
@@ -1446,7 +1457,8 @@ var AdvancedPowerFlowCard = class extends i {
 			x: 50,
 			y: centerY + 2,
 			w: 190,
-			h: 88
+			h: 88,
+			activity: this._activityFromPower(this._powerW(this._config.grid?.power))
 		};
 		const houseInfo = this._housePowerInfo();
 		const house = {
@@ -1459,7 +1471,8 @@ var AdvancedPowerFlowCard = class extends i {
 			x: 760,
 			y: centerY + 2,
 			w: 190,
-			h: 88
+			h: 88,
+			activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown"
 		};
 		const bottom = [];
 		const bottomSpecs = [];
@@ -1480,7 +1493,9 @@ var AdvancedPowerFlowCard = class extends i {
 						x,
 						y,
 						w: nodeW,
-						h: 90
+						h: 90,
+						activity: this._activityFromPower(this._powerW(battery.power)),
+						batterySoc: this._clampPercent(this._number(battery.soc))
 					}
 				})
 			});
@@ -1504,7 +1519,9 @@ var AdvancedPowerFlowCard = class extends i {
 						y,
 						w: nodeW,
 						h: 94,
-						heatPump: true
+						heatPump: true,
+						activity: this._activityFromPower(this._powerW(hp.power)),
+						badge: this._heatPumpBadge(hp)
 					}
 				})
 			});
@@ -1526,7 +1543,8 @@ var AdvancedPowerFlowCard = class extends i {
 						x,
 						y,
 						w: nodeW,
-						h: 90
+						h: 90,
+						activity: this._activityFromPower(this._powerW(consumer.power))
 					}
 				})
 			});
@@ -1559,15 +1577,38 @@ var AdvancedPowerFlowCard = class extends i {
 			bottom
 		};
 	}
+	_heatPumpBadge(hp) {
+		const raw = this._raw(hp.mode)?.trim();
+		if (raw) {
+			const normalized = raw.toLowerCase().replace(/[\s-]+/g, "_");
+			return this._short({
+				heat: "Heizen",
+				heating: "Heizen",
+				heating_only: "Heizen",
+				dhw: "Warmwasser",
+				hot_water: "Warmwasser",
+				domestic_hot_water: "Warmwasser",
+				cool: "Kühlen",
+				cooling: "Kühlen",
+				auto: "Auto",
+				standby: "Standby",
+				idle: "Standby",
+				off: "Aus"
+			}[normalized] ?? raw, 15);
+		}
+		const power = this._powerW(hp.power);
+		if (power === void 0) return "Status —";
+		return Math.abs(power) > this._threshold() ? "Aktiv" : "Standby";
+	}
 	_heatPumpSummary(hp) {
 		const parts = [];
-		const mode = this._raw(hp.mode);
-		if (mode) parts.push(mode);
 		const flow = this._number(hp.flow_temperature);
 		if (flow !== void 0) {
 			const unit = this._unit(hp.flow_temperature) || "°C";
 			parts.push(`VL ${flow.toLocaleString(void 0, { maximumFractionDigits: 1 })} ${unit}`);
 		}
+		const cop = this._number(hp.cop);
+		if (cop !== void 0) parts.push(`COP ${cop.toLocaleString(void 0, { maximumFractionDigits: 1 })}`);
 		return parts.length ? parts.join(" · ") : "Details anzeigen";
 	}
 	_flowPath(d, direction, power, key = "") {
@@ -1598,9 +1639,14 @@ var AdvancedPowerFlowCard = class extends i {
 		const mainY = node.y + 54;
 		const subY = node.y + 73;
 		const clickable = Boolean(node.entity || node.heatPump);
+		const activity = node.activity ?? "unknown";
+		const socTrackX = node.x + 14;
+		const socTrackY = node.y + node.h - 9;
+		const socTrackW = Math.max(0, node.w - 28);
+		const socFillW = node.batterySoc === void 0 ? 0 : socTrackW * node.batterySoc / 100;
 		return w`
       <g
-        class=${`node ${node.kind} ${clickable ? "clickable" : ""}`}
+        class=${`node ${node.kind} ${activity} ${clickable ? "clickable" : ""}`}
         @click=${() => this._handleNodeClick(node)}
       >
         <rect
@@ -1614,11 +1660,45 @@ var AdvancedPowerFlowCard = class extends i {
         ></rect>
         <text x=${node.x + 14} y=${titleY} class="node-title">
           <tspan class="node-icon">${icon[node.kind]}</tspan>
-          <tspan dx="8">${this._short(node.title, 28)}</tspan>
+          <tspan dx="8">${this._short(node.title, node.badge ? 20 : 28)}</tspan>
         </text>
+        ${node.badge ? w`
+            <g class="status-badge">
+              <rect
+                x=${node.x + node.w - Math.min(92, Math.max(52, node.badge.length * 7 + 20)) - 14}
+                y=${node.y + 10}
+                width=${Math.min(92, Math.max(52, node.badge.length * 7 + 20))}
+                height="23"
+                rx="11.5"
+              ></rect>
+              <text
+                x=${node.x + node.w - 14 - Math.min(92, Math.max(52, node.badge.length * 7 + 20)) / 2}
+                y=${node.y + 26}
+                text-anchor="middle"
+              >${this._short(node.badge, 15)}</text>
+            </g>
+          ` : A}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
         ${node.sub ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, 34)}</text>` : A}
-        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + 26} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : A}
+        ${node.kind === "battery" && node.batterySoc !== void 0 ? w`
+            <rect
+              x=${socTrackX}
+              y=${socTrackY}
+              width=${socTrackW}
+              height="4.5"
+              rx="2.25"
+              class="battery-soc-track"
+            ></rect>
+            <rect
+              x=${socTrackX}
+              y=${socTrackY}
+              width=${socFillW}
+              height="4.5"
+              rx="2.25"
+              class="battery-soc-fill"
+            ></rect>
+          ` : A}
+        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : A}
       </g>
     `;
 	}
@@ -1883,7 +1963,32 @@ var AdvancedPowerFlowCard = class extends i {
       stroke: color-mix(in srgb, var(--divider-color) 82%, var(--primary-color) 18%);
       stroke-width: 1.45;
       filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--primary-text-color) 9%, transparent));
+      transition: opacity 160ms ease, stroke-width 160ms ease, filter 160ms ease;
     }
+
+    .node.active .node-bg {
+      stroke-width: 1.9;
+      filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--primary-color) 12%, transparent));
+    }
+
+    .node.idle .node-bg {
+      opacity: .72;
+      filter: none;
+    }
+
+    .node.idle .node-icon { opacity: .58; }
+    .node.idle .node-main { opacity: .82; }
+    .node.idle .node-sub { opacity: .75; }
+
+    .node.unknown .node-bg {
+      opacity: .56;
+      stroke-dasharray: 5 4;
+      filter: none;
+    }
+
+    .node.unknown .node-icon,
+    .node.unknown .node-main,
+    .node.unknown .node-sub { opacity: .62; }
 
     .node-bg.pv,
     .node-bg.pv-parent {
@@ -1950,6 +2055,30 @@ var AdvancedPowerFlowCard = class extends i {
       fill: var(--secondary-text-color);
       font-size: 13.5px;
     }
+
+    .battery-soc-track {
+      fill: color-mix(in srgb, var(--secondary-text-color) 18%, transparent);
+    }
+
+    .battery-soc-fill {
+      fill: var(--apfc-battery);
+      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 35%, transparent));
+    }
+
+    .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-heat) 16%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-heat) 48%, var(--divider-color));
+      stroke-width: 1;
+    }
+
+    .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-heat) 78%, var(--primary-text-color));
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+
+    .node.idle .status-badge,
+    .node.unknown .status-badge { opacity: .7; }
 
     .node-action {
       fill: var(--secondary-text-color);

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Added a graphical SOC fill bar to every battery node.
+- Added a compact operating-mode/status badge to the heat-pump node.
+- Added visual active, idle and unavailable node states.
+- Idle nodes are intentionally quieter while active nodes receive a slightly stronger outline.
+- Unavailable nodes use a subdued dashed outline so missing data is immediately recognizable.
+- Heat-pump summary now prioritizes flow temperature and COP because the operating mode is shown as a badge.
+
 ## 0.2.2
 
 - Increased diagram typography slightly for better phone readability.
