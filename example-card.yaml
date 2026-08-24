@@ -1,33 +1,44 @@
 type: custom:advanced-power-flow-card
 title: Energiefluss
+power_threshold: 5
+
 solar:
-  pv1:
-    name: PV1
-    power: sensor.goodwe_pv1_power
-    voltage: sensor.goodwe_pv1_voltage
-    current: sensor.goodwe_pv1_current
-  pv2:
-    name: PV2
-    power: sensor.goodwe_pv2_power
-    voltage: sensor.goodwe_pv2_voltage
-    current: sensor.goodwe_pv2_current
-  pv3:
-    name: PV3
-    power: sensor.goodwe_pv3_power
-    voltage: sensor.goodwe_pv3_voltage
-    current: sensor.goodwe_pv3_current
+  - name: GoodWe
+    power: sensor.goodwe_pv_power
+    children:
+      - name: MPPT 1
+        power: sensor.goodwe_pv1_power
+        voltage: sensor.goodwe_pv1_voltage
+        current: sensor.goodwe_pv1_current
+      - name: MPPT 2
+        power: sensor.goodwe_pv2_power
+        voltage: sensor.goodwe_pv2_voltage
+        current: sensor.goodwe_pv2_current
+      - name: MPPT 3
+        power: sensor.goodwe_pv3_power
+        voltage: sensor.goodwe_pv3_voltage
+        current: sensor.goodwe_pv3_current
 
-battery1:
-  name: Batterie 1
-  power: sensor.battery_1_power
-  soc: sensor.battery_1_soc
-  positive_is_charging: true
+  - name: Victron
+    children:
+      - name: MPPT Garage
+        power: sensor.victron_mppt_garage_power
+        voltage: sensor.victron_mppt_garage_voltage
+        current: sensor.victron_mppt_garage_current
+      - name: MPPT Garten
+        power: sensor.victron_mppt_garten_power
+        voltage: sensor.victron_mppt_garten_voltage
+        current: sensor.victron_mppt_garten_current
 
-battery2:
-  name: Batterie 2
-  power: sensor.battery_2_power
-  soc: sensor.battery_2_soc
-  positive_is_charging: true
+batteries:
+  - name: Batterie 1
+    power: sensor.battery_1_power
+    soc: sensor.battery_1_soc
+    positive_is_charging: true
+  - name: Batterie 2
+    power: sensor.battery_2_power
+    soc: sensor.battery_2_soc
+    positive_is_charging: true
 
 grid:
   power: sensor.grid_power
@@ -40,5 +51,22 @@ house:
 heat_pump:
   name: Wärmepumpe
   power: sensor.heatpump_power
+  part_of_house: true
+  flow_temperature: sensor.heatpump_flow_temperature
+  return_temperature: sensor.heatpump_return_temperature
+  outdoor_temperature: sensor.heatpump_outdoor_temperature
+  hot_water_temperature: sensor.heatpump_hot_water_temperature
+  room_temperature: sensor.heatpump_room_temperature
+  target_temperature: sensor.heatpump_target_temperature
+  mode: sensor.heatpump_mode
+  compressor_status: binary_sensor.heatpump_compressor
+  compressor_frequency: sensor.heatpump_compressor_frequency
+  thermal_power: sensor.heatpump_thermal_power
+  cop: sensor.heatpump_cop
+  daily_energy: sensor.heatpump_daily_energy
+  details_expanded_by_default: false
 
-power_threshold: 5
+consumers:
+  - name: Server
+    power: sensor.server_power
+    part_of_house: true

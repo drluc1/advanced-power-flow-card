@@ -1,7 +1,7 @@
 {
   "name": "advanced-power-flow-card",
-  "version": "0.1.0",
-  "description": "Advanced Home Assistant power flow card with three PV strings, two batteries and dedicated consumers.",
+  "version": "0.2.0",
+  "description": "Flexible Home Assistant power flow card with dynamic PV systems, batteries and consumers.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",

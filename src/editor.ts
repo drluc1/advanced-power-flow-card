@@ -1,7 +1,14 @@
 import { LitElement, css, html, nothing } from "lit";
-import type { AdvancedPowerFlowCardConfig, HomeAssistant } from "./types";
-
-type Path = string[];
+import { createStubConfig, normalizeConfig } from "./config";
+import type {
+  AdvancedPowerFlowCardConfig,
+  BatteryConfig,
+  ConsumerConfig,
+  HeatPumpConfig,
+  HomeAssistant,
+  PvInputConfig,
+  PvSystemConfig
+} from "./types";
 
 export class AdvancedPowerFlowCardEditor extends LitElement {
   static properties = {
@@ -10,45 +17,14 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
   };
 
   hass?: HomeAssistant;
-  private _config: AdvancedPowerFlowCardConfig = {
-    type: "custom:advanced-power-flow-card"
-  };
+  private _config: AdvancedPowerFlowCardConfig = createStubConfig();
 
   setConfig(config: AdvancedPowerFlowCardConfig): void {
+    this._config = normalizeConfig(config);
+  }
+
+  private _commit(config: AdvancedPowerFlowCardConfig): void {
     this._config = structuredClone(config);
-  }
-
-  private _get(path: Path): unknown {
-    let value: unknown = this._config;
-    for (const key of path) {
-      if (!value || typeof value !== "object") return undefined;
-      value = (value as Record<string, unknown>)[key];
-    }
-    return value;
-  }
-
-  private _set(path: Path, value: unknown): void {
-    const next = structuredClone(this._config) as unknown as Record<string, unknown>;    let cursor = next;
-
-    path.forEach((key, index) => {
-      if (index === path.length - 1) {
-        if (value === "" || value === undefined || value === null) {
-          delete cursor[key];
-        } else {
-          cursor[key] = value;
-        }
-        return;
-      }
-
-      const existing = cursor[key];
-      if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
-        cursor[key] = {};
-      }
-      cursor = cursor[key] as Record<string, unknown>;
-    });
-
-    this._config = next as unknown as AdvancedPowerFlowCardConfig;
-
     this.dispatchEvent(
       new CustomEvent("config-changed", {
         detail: { config: this._config },
@@ -58,61 +34,129 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     );
   }
 
-  private _entityPicker(label: string, path: Path) {
-    const value = (this._get(path) as string | undefined) ?? "";
+  private _with(mutator: (config: AdvancedPowerFlowCardConfig) => void): void {
+    const next = structuredClone(this._config);
+    mutator(next);
+    this._commit(next);
+  }
+
+  private _entityPicker(
+    label: string,
+    value: string | undefined,
+    onChange: (value: string | undefined) => void
+  ) {
     return html`
       <label>${label}</label>
       <ha-entity-picker
         .hass=${this.hass}
-        .value=${value}
+        .value=${value ?? ""}
         .allowCustomEntity=${true}
-        @value-changed=${(event: CustomEvent) =>
-          this._set(path, event.detail?.value ?? "")}
+        @value-changed=${(event: CustomEvent) => {
+          const next = event.detail?.value as string | undefined;
+          onChange(next || undefined);
+        }}
       ></ha-entity-picker>
     `;
   }
 
-  private _textInput(label: string, path: Path, placeholder = "") {
-    const value = (this._get(path) as string | undefined) ?? "";
+  private _textInput(
+    label: string,
+    value: string | undefined,
+    placeholder: string,
+    onChange: (value: string | undefined) => void
+  ) {
     return html`
       <label>${label}</label>
       <input
         type="text"
-        .value=${value}
+        .value=${value ?? ""}
         placeholder=${placeholder}
-        @input=${(event: Event) =>
-          this._set(path, (event.target as HTMLInputElement).value)}
+        @input=${(event: Event) => {
+          const next = (event.target as HTMLInputElement).value.trim();
+          onChange(next || undefined);
+        }}
       />
     `;
   }
 
-  private _numberInput(label: string, path: Path, fallback: number) {
-    const value = (this._get(path) as number | undefined) ?? fallback;
+  private _numberInput(
+    label: string,
+    value: number | undefined,
+    fallback: number,
+    onChange: (value: number) => void
+  ) {
     return html`
       <label>${label}</label>
       <input
         type="number"
-        .value=${String(value)}
-        @input=${(event: Event) =>
-          this._set(path, Number((event.target as HTMLInputElement).value))}
+        min="0"
+        step="1"
+        .value=${String(value ?? fallback)}
+        @input=${(event: Event) => {
+          const parsed = Number((event.target as HTMLInputElement).value);
+          if (Number.isFinite(parsed)) onChange(parsed);
+        }}
       />
     `;
   }
 
-  private _checkbox(label: string, path: Path, fallback: boolean) {
-    const stored = this._get(path);
-    const checked = typeof stored === "boolean" ? stored : fallback;
+  private _checkbox(
+    label: string,
+    value: boolean | undefined,
+    fallback: boolean,
+    onChange: (value: boolean) => void
+  ) {
     return html`
       <label class="check">
         <input
           type="checkbox"
-          .checked=${checked}
+          .checked=${typeof value === "boolean" ? value : fallback}
           @change=${(event: Event) =>
-            this._set(path, (event.target as HTMLInputElement).checked)}
+            onChange((event.target as HTMLInputElement).checked)}
         />
         <span>${label}</span>
       </label>
     `;
+  }
+
+  private _updateSolar(index: number, patch: Partial<PvSystemConfig>): void {
+    this._with((config) => {
+      config.solar ??= [];
+      config.solar[index] = { ...config.solar[index], ...patch };
+    });
+  }
+
+  private _updateMppt(
+    solarIndex: number,
+    inputIndex: number,
+    patch: Partial<PvInputConfig>
+  ): void {
+    this._with((config) => {
+      config.solar ??= [];
+      const system = config.solar[solarIndex];
+      system.children ??= [];
+      system.children[inputIndex] = { ...system.children[inputIndex], ...patch };
+    });
+  }
+
+  private _updateBattery(index: number, patch: Partial<BatteryConfig>): void {
+    this._with((config) => {
+      config.batteries ??= [];
+      config.batteries[index] = { ...config.batteries[index], ...patch };
+    });
+  }
+
+  private _updateConsumer(index: number, patch: Partial<ConsumerConfig>): void {
+    this._with((config) => {
+      config.consumers ??= [];
+      config.consumers[index] = { ...config.consumers[index], ...patch };
+    });
+  }
+
+  private _updateHeatPump(patch: Partial<HeatPumpConfig>): void {
+    this._with((config) => {
+      config.heat_pump = { ...config.heat_pump, ...patch };
+    });
   }
 
   render() {
@@ -121,137 +165,352 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     return html`
       <div class="editor">
         <section>
-          <h3>Allgemein</h3>
-          ${this._textInput("Titel", ["title"], "Energiefluss")}
-          ${this._numberInput("Animationsschwelle in W", ["power_threshold"], 5)}
-        </section>
-
-        ${this._pvSection("PV1", "pv1")}
-        ${this._pvSection("PV2", "pv2")}
-        ${this._pvSection("PV3", "pv3")}
-
-        ${this._batterySection("Batterie 1", "battery1")}
-        ${this._batterySection("Batterie 2", "battery2")}
-
-        <section>
-          <h3>Netz</h3>
-          ${this._entityPicker("Leistung", ["grid", "power"])}
-          ${this._checkbox(
-            "Positiver Wert bedeutet Netzbezug",
-            ["grid", "positive_is_import"],
-            true
+          <div class="section-title">
+            <h3>Allgemein</h3>
+          </div>
+          ${this._textInput(
+            "Titel",
+            this._config.title,
+            "Energiefluss",
+            (value) => this._with((config) => { config.title = value; })
+          )}
+          ${this._numberInput(
+            "Animationsschwelle in W",
+            this._config.power_threshold,
+            5,
+            (value) => this._with((config) => { config.power_threshold = value; })
           )}
         </section>
 
         <section>
-          <h3>Haus</h3>
-          ${this._textInput("Name", ["house", "name"], "Haus")}
-          ${this._entityPicker("Leistung", ["house", "power"])}
+          <div class="section-title">
+            <h3>PV-Systeme</h3>
+            <button
+              class="add"
+              @click=${() => this._with((config) => {
+                config.solar ??= [];
+                config.solar.push({
+                  name: `PV ${config.solar.length + 1}`,
+                  children: []
+                });
+              })}
+            >+ PV-System</button>
+          </div>
+
+          <div class="stack full">
+            ${(this._config.solar ?? []).map((system, solarIndex) => html`
+              <div class="group">
+                <div class="group-head">
+                  <strong>${system.name || `PV ${solarIndex + 1}`}</strong>
+                  <button
+                    class="danger"
+                    @click=${() => this._with((config) => {
+                      config.solar?.splice(solarIndex, 1);
+                    })}
+                  >Entfernen</button>
+                </div>
+
+                <div class="form-grid">
+                  ${this._textInput(
+                    "Name",
+                    system.name,
+                    `PV ${solarIndex + 1}`,
+                    (value) => this._updateSolar(solarIndex, { name: value })
+                  )}
+                  ${this._entityPicker(
+                    "Gesamtleistung (optional)",
+                    system.power,
+                    (value) => this._updateSolar(solarIndex, { power: value })
+                  )}
+                </div>
+
+                <div class="subhead">
+                  <span>Sub-PV / MPPTs</span>
+                  <button
+                    class="add small"
+                    @click=${() => this._with((config) => {
+                      const target = config.solar?.[solarIndex];
+                      if (!target) return;
+                      target.children ??= [];
+                      target.children.push({
+                        name: `MPPT ${target.children.length + 1}`
+                      });
+                    })}
+                  >+ MPPT</button>
+                </div>
+
+                <div class="stack">
+                  ${(system.children ?? []).map((input, inputIndex) => html`
+                    <div class="subgroup">
+                      <div class="group-head compact">
+                        <strong>${input.name || `MPPT ${inputIndex + 1}`}</strong>
+                        <button
+                          class="danger small"
+                          @click=${() => this._with((config) => {
+                            config.solar?.[solarIndex]?.children?.splice(inputIndex, 1);
+                          })}
+                        >Entfernen</button>
+                      </div>
+                      <div class="form-grid">
+                        ${this._textInput(
+                          "Name",
+                          input.name,
+                          `MPPT ${inputIndex + 1}`,
+                          (value) => this._updateMppt(solarIndex, inputIndex, { name: value })
+                        )}
+                        ${this._entityPicker(
+                          "Leistung",
+                          input.power,
+                          (value) => this._updateMppt(solarIndex, inputIndex, { power: value })
+                        )}
+                        ${this._entityPicker(
+                          "Spannung",
+                          input.voltage,
+                          (value) => this._updateMppt(solarIndex, inputIndex, { voltage: value })
+                        )}
+                        ${this._entityPicker(
+                          "Strom",
+                          input.current,
+                          (value) => this._updateMppt(solarIndex, inputIndex, { current: value })
+                        )}
+                      </div>
+                    </div>
+                  `)}
+                </div>
+              </div>
+            `)}
+          </div>
         </section>
 
         <section>
-          <h3>Wärmepumpe</h3>
-          ${this._textInput("Name", ["heat_pump", "name"], "Wärmepumpe")}
-          ${this._entityPicker("Leistung", ["heat_pump", "power"])}
+          <div class="section-title">
+            <h3>Batterien</h3>
+            <button
+              class="add"
+              @click=${() => this._with((config) => {
+                config.batteries ??= [];
+                config.batteries.push({
+                  name: `Batterie ${config.batteries.length + 1}`,
+                  positive_is_charging: true
+                });
+              })}
+            >+ Batterie</button>
+          </div>
+
+          <div class="stack full">
+            ${(this._config.batteries ?? []).map((battery, index) => html`
+              <div class="group">
+                <div class="group-head">
+                  <strong>${battery.name || `Batterie ${index + 1}`}</strong>
+                  <button
+                    class="danger"
+                    @click=${() => this._with((config) => {
+                      config.batteries?.splice(index, 1);
+                    })}
+                  >Entfernen</button>
+                </div>
+                <div class="form-grid">
+                  ${this._textInput(
+                    "Name",
+                    battery.name,
+                    `Batterie ${index + 1}`,
+                    (value) => this._updateBattery(index, { name: value })
+                  )}
+                  ${this._entityPicker(
+                    "Leistung",
+                    battery.power,
+                    (value) => this._updateBattery(index, { power: value })
+                  )}
+                  ${this._entityPicker(
+                    "SOC",
+                    battery.soc,
+                    (value) => this._updateBattery(index, { soc: value })
+                  )}
+                  ${this._checkbox(
+                    "Positiver Wert bedeutet Laden",
+                    battery.positive_is_charging,
+                    true,
+                    (value) => this._updateBattery(index, { positive_is_charging: value })
+                  )}
+                </div>
+              </div>
+            `)}
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title"><h3>Netz & Haus</h3></div>
+          <div class="form-grid full">
+            ${this._entityPicker(
+              "Netzleistung",
+              this._config.grid?.power,
+              (value) => this._with((config) => {
+                config.grid = { ...config.grid, power: value };
+              })
+            )}
+            ${this._checkbox(
+              "Positiver Netzwert bedeutet Bezug",
+              this._config.grid?.positive_is_import,
+              true,
+              (value) => this._with((config) => {
+                config.grid = { ...config.grid, positive_is_import: value };
+              })
+            )}
+            ${this._textInput(
+              "Hausname",
+              this._config.house?.name,
+              "Haus",
+              (value) => this._with((config) => {
+                config.house = { ...config.house, name: value };
+              })
+            )}
+            ${this._entityPicker(
+              "Hausleistung",
+              this._config.house?.power,
+              (value) => this._with((config) => {
+                config.house = { ...config.house, power: value };
+              })
+            )}
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title"><h3>Wärmepumpe</h3></div>
+          <div class="form-grid full">
+            ${this._textInput("Name", this._config.heat_pump?.name, "Wärmepumpe", (value) => this._updateHeatPump({ name: value }))}
+            ${this._entityPicker("Elektrische Leistung", this._config.heat_pump?.power, (value) => this._updateHeatPump({ power: value }))}
+            ${this._checkbox("Teil des Hausverbrauchs", this._config.heat_pump?.part_of_house, true, (value) => this._updateHeatPump({ part_of_house: value }))}
+            ${this._checkbox("Details standardmäßig geöffnet", this._config.heat_pump?.details_expanded_by_default, false, (value) => this._updateHeatPump({ details_expanded_by_default: value }))}
+            ${this._entityPicker("Vorlauftemperatur", this._config.heat_pump?.flow_temperature, (value) => this._updateHeatPump({ flow_temperature: value }))}
+            ${this._entityPicker("Rücklauftemperatur", this._config.heat_pump?.return_temperature, (value) => this._updateHeatPump({ return_temperature: value }))}
+            ${this._entityPicker("Außentemperatur", this._config.heat_pump?.outdoor_temperature, (value) => this._updateHeatPump({ outdoor_temperature: value }))}
+            ${this._entityPicker("Warmwassertemperatur", this._config.heat_pump?.hot_water_temperature, (value) => this._updateHeatPump({ hot_water_temperature: value }))}
+            ${this._entityPicker("Raumtemperatur", this._config.heat_pump?.room_temperature, (value) => this._updateHeatPump({ room_temperature: value }))}
+            ${this._entityPicker("Solltemperatur", this._config.heat_pump?.target_temperature, (value) => this._updateHeatPump({ target_temperature: value }))}
+            ${this._entityPicker("Betriebsmodus", this._config.heat_pump?.mode, (value) => this._updateHeatPump({ mode: value }))}
+            ${this._entityPicker("Kompressorstatus", this._config.heat_pump?.compressor_status, (value) => this._updateHeatPump({ compressor_status: value }))}
+            ${this._entityPicker("Kompressorfrequenz", this._config.heat_pump?.compressor_frequency, (value) => this._updateHeatPump({ compressor_frequency: value }))}
+            ${this._entityPicker("Thermische Leistung", this._config.heat_pump?.thermal_power, (value) => this._updateHeatPump({ thermal_power: value }))}
+            ${this._entityPicker("COP", this._config.heat_pump?.cop, (value) => this._updateHeatPump({ cop: value }))}
+            ${this._entityPicker("Tagesenergie", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">
+            <h3>Weitere Verbraucher</h3>
+            <button
+              class="add"
+              @click=${() => this._with((config) => {
+                config.consumers ??= [];
+                config.consumers.push({
+                  name: `Verbraucher ${config.consumers.length + 1}`,
+                  part_of_house: true
+                });
+              })}
+            >+ Verbraucher</button>
+          </div>
+
+          <div class="stack full">
+            ${(this._config.consumers ?? []).map((consumer, index) => html`
+              <div class="group">
+                <div class="group-head">
+                  <strong>${consumer.name || `Verbraucher ${index + 1}`}</strong>
+                  <button
+                    class="danger"
+                    @click=${() => this._with((config) => {
+                      config.consumers?.splice(index, 1);
+                    })}
+                  >Entfernen</button>
+                </div>
+                <div class="form-grid">
+                  ${this._textInput("Name", consumer.name, `Verbraucher ${index + 1}`, (value) => this._updateConsumer(index, { name: value }))}
+                  ${this._entityPicker("Leistung", consumer.power, (value) => this._updateConsumer(index, { power: value }))}
+                  ${this._checkbox("Teil des Hausverbrauchs", consumer.part_of_house, true, (value) => this._updateConsumer(index, { part_of_house: value }))}
+                </div>
+              </div>
+            `)}
+          </div>
         </section>
       </div>
     `;
   }
 
-  private _pvSection(title: string, key: "pv1" | "pv2" | "pv3") {
-    return html`
-      <section>
-        <h3>${title}</h3>
-        ${this._textInput("Name", ["solar", key, "name"], title)}
-        ${this._entityPicker("Leistung", ["solar", key, "power"])}
-        ${this._entityPicker("Spannung", ["solar", key, "voltage"])}
-        ${this._entityPicker("Strom", ["solar", key, "current"])}
-      </section>
-    `;
-  }
-
-  private _batterySection(title: string, key: "battery1" | "battery2") {
-    return html`
-      <section>
-        <h3>${title}</h3>
-        ${this._textInput("Name", [key, "name"], title)}
-        ${this._entityPicker("Leistung", [key, "power"])}
-        ${this._entityPicker("Ladezustand (SOC)", [key, "soc"])}
-        ${this._checkbox(
-          "Positiver Wert bedeutet Laden",
-          [key, "positive_is_charging"],
-          true
-        )}
-      </section>
-    `;
-  }
-
   static styles = css`
-    :host {
-      display: block;
-    }
-
-    .editor {
-      display: grid;
-      gap: 12px;
-      padding: 4px 0;
-    }
-
+    :host { display: block; }
+    .editor { display: grid; gap: 14px; padding: 4px 0; }
     section {
       display: grid;
-      grid-template-columns: minmax(140px, 0.8fr) minmax(180px, 1.4fr);
-      gap: 8px 12px;
-      padding: 12px;
+      grid-template-columns: minmax(150px, .75fr) minmax(220px, 1.5fr);
+      gap: 10px 14px;
+      padding: 14px;
       border: 1px solid var(--divider-color);
-      border-radius: 12px;
+      border-radius: 14px;
     }
-
-    h3 {
-      grid-column: 1 / -1;
-      margin: 0 0 4px;
-      font-size: 15px;
+    .section-title,
+    .group-head,
+    .subhead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
-
-    label {
-      align-self: center;
-      font-size: 14px;
-    }
-
-    input[type="text"],
-    input[type="number"] {
+    .section-title { grid-column: 1 / -1; }
+    h3 { margin: 0; font-size: 16px; }
+    label { align-self: center; font-size: 14px; }
+    input[type="text"], input[type="number"] {
       box-sizing: border-box;
       width: 100%;
-      min-height: 40px;
+      min-height: 42px;
       border: 1px solid var(--divider-color);
-      border-radius: 8px;
+      border-radius: 9px;
       padding: 8px 10px;
       background: var(--card-background-color);
       color: var(--primary-text-color);
     }
-
+    button {
+      border: 1px solid var(--divider-color);
+      border-radius: 9px;
+      padding: 8px 11px;
+      background: var(--secondary-background-color);
+      color: var(--primary-text-color);
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover { border-color: var(--primary-color); }
+    .add { font-weight: 600; }
+    .danger { color: var(--error-color); }
+    .small { padding: 5px 8px; font-size: 12px; }
+    .full, .stack { grid-column: 1 / -1; }
+    .stack { display: grid; gap: 10px; }
+    .group, .subgroup {
+      padding: 12px;
+      border: 1px solid var(--divider-color);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--secondary-background-color) 55%, transparent);
+    }
+    .subgroup { margin-top: 8px; }
+    .group-head { margin-bottom: 10px; }
+    .group-head.compact { margin-bottom: 8px; }
+    .subhead { margin-top: 12px; font-weight: 600; font-size: 13px; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, .75fr) minmax(220px, 1.5fr);
+      gap: 9px 14px;
+    }
     .check {
       grid-column: 1 / -1;
       display: flex;
       gap: 8px;
       align-items: center;
     }
-
-    @media (max-width: 600px) {
-      section {
-        grid-template-columns: 1fr;
-      }
-
-      h3,
-      .check {
-        grid-column: 1;
-      }
+    @media (max-width: 680px) {
+      section, .form-grid { grid-template-columns: 1fr; }
+      .section-title, .full, .stack, .check { grid-column: 1; }
     }
   `;
 }
 
 if (!customElements.get("advanced-power-flow-card-editor")) {
-  customElements.define(
-    "advanced-power-flow-card-editor",
-    AdvancedPowerFlowCardEditor
-  );
+  customElements.define("advanced-power-flow-card-editor", AdvancedPowerFlowCardEditor);
 }

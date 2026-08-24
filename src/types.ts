@@ -8,11 +8,17 @@ export interface HomeAssistant {
   states: Record<string, HassEntity>;
 }
 
-export interface PvConfig {
+export interface PvInputConfig {
   name?: string;
   power?: string;
   voltage?: string;
   current?: string;
+}
+
+export interface PvSystemConfig {
+  name?: string;
+  power?: string;
+  children?: PvInputConfig[];
 }
 
 export interface BatteryConfig {
@@ -30,21 +36,34 @@ export interface GridConfig {
 export interface ConsumerConfig {
   name?: string;
   power?: string;
+  part_of_house?: boolean;
+}
+
+export interface HeatPumpConfig extends ConsumerConfig {
+  flow_temperature?: string;
+  return_temperature?: string;
+  outdoor_temperature?: string;
+  hot_water_temperature?: string;
+  room_temperature?: string;
+  target_temperature?: string;
+  mode?: string;
+  compressor_status?: string;
+  compressor_frequency?: string;
+  thermal_power?: string;
+  cop?: string;
+  daily_energy?: string;
+  details_expanded_by_default?: boolean;
 }
 
 export interface AdvancedPowerFlowCardConfig {
   type: string;
   title?: string;
-  solar?: {
-    pv1?: PvConfig;
-    pv2?: PvConfig;
-    pv3?: PvConfig;
-  };
-  battery1?: BatteryConfig;
-  battery2?: BatteryConfig;
+  solar?: PvSystemConfig[];
+  batteries?: BatteryConfig[];
   grid?: GridConfig;
   house?: ConsumerConfig;
-  heat_pump?: ConsumerConfig;
+  heat_pump?: HeatPumpConfig;
+  consumers?: ConsumerConfig[];
   power_threshold?: number;
 }
 
