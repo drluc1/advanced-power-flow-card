@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+- Increased diagram typography slightly for better phone readability.
+- Added subtle semantic accents for PV, grid, battery and heat-pump nodes.
+- Added softer node shadows and a subtle active-flow glow.
+- Refined PV cluster styling and visual hierarchy.
+- Hid the layout hint on small screens to reduce visual clutter.
+- MPPT secondary information now omits missing voltage/current values instead of showing placeholder dashes.
+
 ## 0.2.1
 
 - Removed internal horizontal scrolling; the complete diagram now fits the card width.

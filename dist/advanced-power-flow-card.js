@@ -1144,7 +1144,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.1";
+var CARD_VERSION = "0.2.2";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1232,10 +1232,16 @@ var AdvancedPowerFlowCard = class extends i {
 		return value === void 0 ? "SOC —" : `SOC ${value.toLocaleString(void 0, { maximumFractionDigits: 0 })} %`;
 	}
 	_pvSub(input) {
-		const voltage = this._formatMeasurement(input.voltage, "V");
-		const current = this._formatMeasurement(input.current, "A");
-		if (voltage === "—" && current === "—") return "";
-		return `${voltage} · ${current}`;
+		const parts = [];
+		if (input.voltage) {
+			const voltage = this._formatMeasurement(input.voltage, "V");
+			if (voltage !== "—") parts.push(voltage);
+		}
+		if (input.current) {
+			const current = this._formatMeasurement(input.current, "A");
+			if (current !== "—") parts.push(current);
+		}
+		return parts.join(" · ");
 	}
 	_threshold() {
 		return Math.max(0, this._config.power_threshold ?? 5);
@@ -1591,9 +1597,10 @@ var AdvancedPowerFlowCard = class extends i {
 		const titleY = node.y + 26;
 		const mainY = node.y + 54;
 		const subY = node.y + 73;
+		const clickable = Boolean(node.entity || node.heatPump);
 		return w`
       <g
-        class=${`node ${Boolean(node.entity || node.heatPump) ? "clickable" : ""}`}
+        class=${`node ${node.kind} ${clickable ? "clickable" : ""}`}
         @click=${() => this._handleNodeClick(node)}
       >
         <rect
@@ -1782,8 +1789,13 @@ var AdvancedPowerFlowCard = class extends i {
     :host {
       display: block;
       --apfc-flow: var(--primary-color);
-      --apfc-line: color-mix(in srgb, var(--secondary-text-color) 34%, transparent);
-      --apfc-node-bg: color-mix(in srgb, var(--card-background-color) 91%, var(--primary-color) 9%);
+      --apfc-line: color-mix(in srgb, var(--secondary-text-color) 28%, transparent);
+      --apfc-node-bg: color-mix(in srgb, var(--card-background-color) 94%, var(--primary-color) 6%);
+      --apfc-solar: var(--warning-color, #f4b400);
+      --apfc-grid: var(--info-color, #039be5);
+      --apfc-battery: var(--success-color, #43a047);
+      --apfc-heat: var(--orange-color, #fb8c00);
+      --apfc-consumer: var(--primary-color);
     }
 
     ha-card {
@@ -1836,10 +1848,9 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .cluster-bg {
-      fill: color-mix(in srgb, var(--secondary-background-color) 45%, transparent);
-      stroke: color-mix(in srgb, var(--divider-color) 78%, transparent);
+      fill: color-mix(in srgb, var(--apfc-solar) 4%, var(--secondary-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 20%, var(--divider-color));
       stroke-width: 1.2;
-      stroke-dasharray: 5 7;
     }
 
     .flow-base {
@@ -1852,10 +1863,11 @@ var AdvancedPowerFlowCard = class extends i {
     .flow {
       fill: none;
       stroke: var(--apfc-flow);
-      stroke-width: 3.5;
+      stroke-width: 3.8;
       stroke-linecap: round;
       stroke-dasharray: 8 14;
       opacity: .98;
+      filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--apfc-flow) 42%, transparent));
       animation: dash var(--flow-duration, 1.35s) linear infinite;
     }
 
@@ -1868,56 +1880,87 @@ var AdvancedPowerFlowCard = class extends i {
 
     .node-bg {
       fill: var(--apfc-node-bg);
-      stroke: color-mix(in srgb, var(--divider-color) 78%, var(--primary-color) 22%);
-      stroke-width: 1.5;
+      stroke: color-mix(in srgb, var(--divider-color) 82%, var(--primary-color) 18%);
+      stroke-width: 1.45;
+      filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--primary-text-color) 9%, transparent));
+    }
+
+    .node-bg.pv,
+    .node-bg.pv-parent {
+      fill: color-mix(in srgb, var(--apfc-solar) 8%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 46%, var(--divider-color));
     }
 
     .node-bg.pv-parent {
-      fill: color-mix(in srgb, var(--primary-color) 8%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--primary-color) 42%, var(--divider-color));
+      fill: color-mix(in srgb, var(--apfc-solar) 12%, var(--card-background-color));
+      stroke-width: 1.8;
     }
 
     .node-bg.center {
-      fill: color-mix(in srgb, var(--primary-color) 15%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--primary-color) 62%, var(--divider-color));
-      stroke-width: 2;
+      fill: color-mix(in srgb, var(--primary-color) 16%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--primary-color) 68%, var(--divider-color));
+      stroke-width: 2.2;
+      filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--primary-color) 18%, transparent));
+    }
+
+    .node-bg.grid {
+      fill: color-mix(in srgb, var(--apfc-grid) 8%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-grid) 40%, var(--divider-color));
+    }
+
+    .node-bg.battery {
+      fill: color-mix(in srgb, var(--apfc-battery) 8%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-battery) 40%, var(--divider-color));
     }
 
     .node-bg.heat {
-      fill: color-mix(in srgb, var(--primary-color) 10%, var(--card-background-color));
+      fill: color-mix(in srgb, var(--apfc-heat) 9%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-heat) 42%, var(--divider-color));
     }
+
+    .node-bg.house,
+    .node-bg.consumer {
+      fill: color-mix(in srgb, var(--apfc-consumer) 7%, var(--card-background-color));
+    }
+
+    .node.pv .node-icon,
+    .node.pv-parent .node-icon { fill: var(--apfc-solar); }
+    .node.grid .node-icon { fill: var(--apfc-grid); }
+    .node.battery .node-icon { fill: var(--apfc-battery); }
+    .node.heat .node-icon { fill: var(--apfc-heat); }
 
     .node-title {
       fill: var(--secondary-text-color);
-      font-size: 15px;
+      font-size: 17px;
       font-weight: 650;
     }
 
     .node-icon {
       fill: var(--primary-color);
-      font-size: 17px;
+      font-size: 19px;
     }
 
     .node-main {
       fill: var(--primary-text-color);
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 750;
     }
 
     .node-sub {
       fill: var(--secondary-text-color);
-      font-size: 12px;
+      font-size: 13.5px;
     }
 
     .node-action {
       fill: var(--secondary-text-color);
-      font-size: 13px;
+      font-size: 14px;
     }
 
     .clickable { cursor: pointer; }
     .clickable:hover .node-bg {
       stroke: var(--primary-color);
       stroke-width: 2.4;
+      filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--primary-color) 18%, transparent));
     }
 
     .legend {
@@ -2009,9 +2052,11 @@ var AdvancedPowerFlowCard = class extends i {
 
     @media (max-width: 700px) {
       ha-card { padding: 12px; }
-      .title { font-size: 21px; }
-      .subtitle { font-size: 13px; }
-      .legend .hint { width: 100%; margin-left: 0; }
+      .title { font-size: 22px; }
+      .subtitle { font-size: 13.5px; }
+      .version { font-size: 11.5px; }
+      .legend { font-size: 11.5px; gap: 10px; }
+      .legend .hint { display: none; }
     }
 
     @media (prefers-reduced-motion: reduce) {
