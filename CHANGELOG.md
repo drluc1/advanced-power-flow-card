@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+- Reworked PV-system hierarchy: MPPT nodes are visually quieter while the system total is shown as a wider, stronger summary node with a `Gesamt` badge.
+- MPPT nodes now use a distinct tracker icon so they are easier to distinguish from the parent PV system.
+- Added an optional `daily_energy` entity to each PV system.
+- Clicking `PV heute` now opens a detailed daily-production breakdown by PV system, including percentage shares when a total is available.
+- Battery nodes are now expandable like the heat-pump node.
+- Added optional battery detail entities for voltage, current, temperature, min/max cell voltage and temperature, SOH, cycle count, remaining energy and daily charge/discharge energy.
+- Battery details automatically calculate and display the cell-voltage delta when min/max values are available.
+
 ## 0.2.4
 
 - Reworked the center node: it now shows total current supply instead of repeating PV power.

@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.2.4";
+const CARD_VERSION = "0.2.5";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -31,6 +31,7 @@ interface DiagramNode {
   w: number;
   h: number;
   heatPump?: boolean;
+  batteryIndex?: number;
   activity?: NodeActivity;
   batterySoc?: number;
   badge?: string;
@@ -71,6 +72,8 @@ export class AdvancedPowerFlowCard extends LitElement {
     hass: { attribute: false },
     _config: { state: true },
     _heatExpanded: { state: true },
+    _expandedBattery: { state: true },
+    _pvDailyExpanded: { state: true },
     _hoveredNode: { state: true }
   };
 
@@ -78,6 +81,8 @@ export class AdvancedPowerFlowCard extends LitElement {
   private _config: AdvancedPowerFlowCardConfig = createStubConfig();
   private _heatExpanded = false;
   private _heatExpansionInitialized = false;
+  private _expandedBattery?: number;
+  private _pvDailyExpanded = false;
   private _hoveredNode?: string;
 
   static getConfigElement(): HTMLElement {
@@ -94,19 +99,26 @@ export class AdvancedPowerFlowCard extends LitElement {
       this._heatExpanded = this._config.heat_pump?.details_expanded_by_default ?? false;
       this._heatExpansionInitialized = true;
     }
+    if (this._expandedBattery !== undefined && this._expandedBattery >= (this._config.batteries ?? []).length) {
+      this._expandedBattery = undefined;
+    }
   }
 
   getCardSize(): number {
-    return this._heatExpanded ? 7 : 6;
+    return this._detailsOpen() ? 8 : 6;
   }
 
   getGridOptions() {
     return {
-      rows: this._heatExpanded ? 7 : 6,
+      rows: this._detailsOpen() ? 8 : 6,
       columns: 12,
       min_rows: 5,
       min_columns: 6
     };
+  }
+
+  private _detailsOpen(): boolean {
+    return this._heatExpanded || this._expandedBattery !== undefined || this._pvDailyExpanded;
   }
 
   private _state(entityId?: string): HassEntity | undefined {
@@ -438,24 +450,84 @@ export class AdvancedPowerFlowCard extends LitElement {
     return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}`;
   }
 
-  private _dailyItems(): Array<{ label: string; value: string; entity: string }> {
-    const daily = this._config.daily;
-    if (!daily) return [];
+  private _energyWh(entityId?: string): number | undefined {
+    const value = this._number(entityId);
+    if (value === undefined) return undefined;
 
-    const candidates: Array<[string, string | undefined]> = [
-      ["PV heute", daily.pv_energy],
-      ["Netzbezug", daily.grid_import_energy],
-      ["Einspeisung", daily.grid_export_energy],
-      ["Haus heute", daily.house_energy]
+    const unit = this._unit(entityId).trim().toLowerCase();
+    if (unit === "kwh") return value * 1000;
+    if (unit === "mwh") return value * 1_000_000;
+    if (unit === "wh" || !unit) return value;
+    return undefined;
+  }
+
+  private _formatEnergyWh(value?: number): string {
+    if (value === undefined) return "—";
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) {
+      return `${(value / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MWh`;
+    }
+    if (abs >= 1000) {
+      return `${(value / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`;
+    }
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} Wh`;
+  }
+
+  private _pvDailyTotalWh(): number | undefined {
+    const direct = this._energyWh(this._config.daily?.pv_energy);
+    if (direct !== undefined) return direct;
+
+    const systems = this._config.solar ?? [];
+    if (!systems.length || systems.some((system) => !system.daily_energy)) return undefined;
+
+    const values = systems.map((system) => this._energyWh(system.daily_energy));
+    if (values.some((value) => value === undefined)) return undefined;
+    return (values as number[]).reduce((sum, value) => sum + value, 0);
+  }
+
+  private _dailyItems(): Array<{
+    key: "pv" | "grid-import" | "grid-export" | "house";
+    label: string;
+    value: string;
+    entity?: string;
+    expandable?: boolean;
+  }> {
+    const daily = this._config.daily;
+    const items: Array<{
+      key: "pv" | "grid-import" | "grid-export" | "house";
+      label: string;
+      value: string;
+      entity?: string;
+      expandable?: boolean;
+    }> = [];
+
+    const pvTotal = this._pvDailyTotalWh();
+    if (daily?.pv_energy || pvTotal !== undefined) {
+      items.push({
+        key: "pv",
+        label: "PV heute",
+        value: daily?.pv_energy ? this._formatEnergy(daily.pv_energy) : this._formatEnergyWh(pvTotal),
+        entity: daily?.pv_energy,
+        expandable: true
+      });
+    }
+
+    const candidates: Array<[
+      "grid-import" | "grid-export" | "house",
+      string,
+      string | undefined
+    ]> = [
+      ["grid-import", "Netzbezug", daily?.grid_import_energy],
+      ["grid-export", "Einspeisung", daily?.grid_export_energy],
+      ["house", "Haus heute", daily?.house_energy]
     ];
 
-    return candidates
-      .filter((item): item is [string, string] => Boolean(item[1]))
-      .map(([label, entity]) => ({
-        label,
-        value: this._formatEnergy(entity),
-        entity
-      }));
+    for (const [key, label, entity] of candidates) {
+      if (!entity) continue;
+      items.push({ key, label, value: this._formatEnergy(entity), entity });
+    }
+
+    return items;
   }
 
   private _flowFocusClass(relatedNodes: string[]): string {
@@ -496,7 +568,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     const childGapX = 12;
     const childGapY = 10;
     const childH = 78;
-    const parentW = 210;
+    const parentMaxW = 430;
     const parentH = 86;
     const clusterPadX = 18;
     const clusterPadY = 18;
@@ -527,6 +599,7 @@ export class AdvancedPowerFlowCard extends LitElement {
           ? Math.min(220, clusterWidth - clusterPadX * 2)
           : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
 
+        const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
         const parentX = clusterX + clusterWidth / 2 - parentW / 2;
         const parentY = pvY + clusterPadY + childrenAreaH + 16;
         const parentPower = this._pvSystemPowerW(system);
@@ -542,7 +615,8 @@ export class AdvancedPowerFlowCard extends LitElement {
           y: parentY,
           w: parentW,
           h: parentH,
-          activity: this._activityFromPower(parentPower)
+          activity: this._activityFromPower(parentPower),
+          badge: "Gesamt"
         };
 
         const childNodes: DiagramNode[] = children.map((child, childIndex) => {
@@ -672,7 +746,8 @@ export class AdvancedPowerFlowCard extends LitElement {
             w: nodeW,
             h: 90,
             activity: this._activityFromPower(this._powerW(battery.power)),
-            batterySoc: this._clampPercent(this._number(battery.soc))
+            batterySoc: this._clampPercent(this._number(battery.soc)),
+            batteryIndex: index
           }
         })
       });
@@ -822,7 +897,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
   private _node(node: DiagramNode) {
     const icon: Record<NodeKind, string> = {
-      pv: "☀",
+      pv: "↯",
       "pv-parent": "☀",
       center: "⚡",
       grid: "⇄",
@@ -835,7 +910,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     const titleY = node.y + 26;
     const mainY = node.y + 54;
     const subY = node.y + 73;
-    const clickable = Boolean(node.entity || node.heatPump);
+    const clickable = Boolean(node.entity || node.heatPump || node.batteryIndex !== undefined);
     const activity = node.activity ?? "unknown";
     const socTrackX = node.x + 14;
     const socTrackY = node.y + node.h - 9;
@@ -922,16 +997,34 @@ export class AdvancedPowerFlowCard extends LitElement {
           : nothing}
         ${node.heatPump
           ? svg`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>`
-          : nothing}
+          : node.batteryIndex !== undefined
+            ? svg`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>`
+            : nothing}
       </g>
     `;
   }
 
   private _handleNodeClick(node: DiagramNode): void {
     if (node.heatPump) {
-      this._heatExpanded = !this._heatExpanded;
+      const next = !this._heatExpanded;
+      this._heatExpanded = next;
+      if (next) {
+        this._expandedBattery = undefined;
+        this._pvDailyExpanded = false;
+      }
       return;
     }
+
+    if (node.batteryIndex !== undefined) {
+      const next = this._expandedBattery === node.batteryIndex ? undefined : node.batteryIndex;
+      this._expandedBattery = next;
+      if (next !== undefined) {
+        this._heatExpanded = false;
+        this._pvDailyExpanded = false;
+      }
+      return;
+    }
+
     if (node.entity) this._openMoreInfo(node.entity);
   }
 
@@ -968,6 +1061,142 @@ export class AdvancedPowerFlowCard extends LitElement {
       <div class="detail-item" @click=${() => this._openMoreInfo(entity)}>
         <span>${label}</span>
         <strong>${this._formatMeasurement(entity, fallbackUnit)}</strong>
+      </div>
+    `;
+  }
+
+  private _detailValueItem(label: string, value: string, note?: string) {
+    return html`
+      <div class="detail-item static">
+        <span>${label}</span>
+        <strong>${value}</strong>
+        ${note ? html`<small>${note}</small>` : nothing}
+      </div>
+    `;
+  }
+
+  private _batteryDetails(battery: BatteryConfig, index: number) {
+    const minCell = this._number(battery.cell_min_voltage);
+    const maxCell = this._number(battery.cell_max_voltage);
+    const delta = minCell !== undefined && maxCell !== undefined
+      ? Math.max(0, maxCell - minCell)
+      : undefined;
+    const deltaUnit = this._unit(battery.cell_max_voltage) || this._unit(battery.cell_min_voltage) || "V";
+    const deltaText = delta === undefined
+      ? undefined
+      : `${delta.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${deltaUnit}`;
+
+    const detailEntities = [
+      battery.power,
+      battery.soc,
+      battery.voltage,
+      battery.current,
+      battery.temperature,
+      battery.cell_min_voltage,
+      battery.cell_max_voltage,
+      battery.cell_min_temperature,
+      battery.cell_max_temperature,
+      battery.state_of_health,
+      battery.cycle_count,
+      battery.remaining_energy,
+      battery.daily_charge_energy,
+      battery.daily_discharge_energy
+    ];
+    const hasAny = detailEntities.some(Boolean);
+
+    return html`
+      <div class="heat-details battery-details">
+        <div class="heat-details-head">
+          <div>
+            <div class="heat-title">▰ ${battery.name ?? `Batterie ${index + 1}`}</div>
+            <div class="heat-subtitle">${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}</div>
+          </div>
+          <button @click=${() => { this._expandedBattery = undefined; }}>Schließen</button>
+        </div>
+        ${hasAny
+          ? html`
+            <div class="detail-grid">
+              ${this._detailItem("Leistung", battery.power)}
+              ${this._detailItem("Ladezustand", battery.soc, "%")}
+              ${this._detailItem("Batteriespannung", battery.voltage, "V")}
+              ${this._detailItem("Batteriestrom", battery.current, "A")}
+              ${this._detailItem("Temperatur", battery.temperature, "°C")}
+              ${this._detailItem("Zellspannung Minimum", battery.cell_min_voltage, "V")}
+              ${this._detailItem("Zellspannung Maximum", battery.cell_max_voltage, "V")}
+              ${deltaText ? this._detailValueItem("Zellspannungs-Delta", deltaText, "Max − Min") : nothing}
+              ${this._detailItem("Zelltemperatur Minimum", battery.cell_min_temperature, "°C")}
+              ${this._detailItem("Zelltemperatur Maximum", battery.cell_max_temperature, "°C")}
+              ${this._detailItem("State of Health", battery.state_of_health, "%")}
+              ${this._detailItem("Zyklen", battery.cycle_count)}
+              ${this._detailItem("Restenergie", battery.remaining_energy)}
+              ${this._detailItem("Ladeenergie heute", battery.daily_charge_energy)}
+              ${this._detailItem("Entladeenergie heute", battery.daily_discharge_energy)}
+            </div>
+          `
+          : html`<div class="empty-detail">Noch keine Detail-Entities für diese Batterie konfiguriert.</div>`}
+      </div>
+    `;
+  }
+
+  private _pvDailyDetails() {
+    const systems = this._config.solar ?? [];
+    const totalWh = this._pvDailyTotalWh();
+    const hasSystemData = systems.some((system) => Boolean(system.daily_energy));
+
+    return html`
+      <div class="heat-details pv-daily-details">
+        <div class="heat-details-head">
+          <div>
+            <div class="heat-title">☀ PV-Produktion heute</div>
+            <div class="heat-subtitle">
+              ${totalWh !== undefined ? `Gesamt ${this._formatEnergyWh(totalWh)}` : "Aufschlüsselung nach PV-System"}
+            </div>
+          </div>
+          <button @click=${() => { this._pvDailyExpanded = false; }}>Schließen</button>
+        </div>
+
+        ${hasSystemData
+          ? html`
+            <div class="detail-grid pv-daily-grid">
+              ${systems.map((system, index) => {
+                const entity = system.daily_energy;
+                const valueWh = this._energyWh(entity);
+                const share = valueWh !== undefined && totalWh !== undefined && totalWh > 0
+                  ? Math.min(100, Math.max(0, valueWh / totalWh * 100))
+                  : undefined;
+                const value = entity ? this._formatEnergy(entity) : "Nicht konfiguriert";
+                return html`
+                  <div
+                    class=${`detail-item pv-daily-system ${entity ? "" : "static missing"}`}
+                    @click=${() => entity && this._openMoreInfo(entity)}
+                  >
+                    <span>${system.name ?? `PV ${index + 1}`}</span>
+                    <strong>${value}</strong>
+                    ${share !== undefined
+                      ? html`
+                        <small>${share.toLocaleString(undefined, { maximumFractionDigits: 1 })} % der Tagesproduktion</small>
+                        <div class="pv-share-track"><i style=${`width:${share}%`}></i></div>
+                      `
+                      : html`<small>Tagesproduktion des Systems</small>`}
+                  </div>
+                `;
+              })}
+            </div>
+          `
+          : html`
+            <div class="empty-detail">
+              Für die einzelnen PV-Systeme ist noch keine Tagesproduktion konfiguriert.
+              Im Karteneditor bei jedem PV-System eine „Tagesproduktion“-Entity auswählen.
+            </div>
+          `}
+
+        ${this._config.daily?.pv_energy
+          ? html`
+            <button class="details-entity-button" @click=${() => this._openMoreInfo(this._config.daily!.pv_energy!)}>
+              PV-Gesamtsensor öffnen
+            </button>
+          `
+          : nothing}
       </div>
     `;
   }
@@ -1047,8 +1276,25 @@ export class AdvancedPowerFlowCard extends LitElement {
           ? html`
             <div class="daily-summary">
               ${dailyItems.map((item) => html`
-                <button class="daily-item" @click=${() => this._openMoreInfo(item.entity)}>
-                  <span>${item.label}</span>
+                <button
+                  class=${`daily-item ${item.expandable ? "expandable" : ""}`}
+                  @click=${() => {
+                    if (item.key === "pv") {
+                      const next = !this._pvDailyExpanded;
+                      this._pvDailyExpanded = next;
+                      if (next) {
+                        this._heatExpanded = false;
+                        this._expandedBattery = undefined;
+                      }
+                      return;
+                    }
+                    if (item.entity) this._openMoreInfo(item.entity);
+                  }}
+                >
+                  <span class="daily-item-label">
+                    ${item.label}
+                    ${item.expandable ? html`<b>${this._pvDailyExpanded ? "▲" : "▼"}</b>` : nothing}
+                  </span>
                   <strong>${item.value}</strong>
                 </button>
               `)}
@@ -1144,7 +1390,11 @@ export class AdvancedPowerFlowCard extends LitElement {
 
         ${this._heatExpanded && this._config.heat_pump
           ? this._heatDetails(this._config.heat_pump)
-          : nothing}
+          : this._expandedBattery !== undefined && this._config.batteries?.[this._expandedBattery]
+            ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery)
+            : this._pvDailyExpanded
+              ? this._pvDailyDetails()
+              : nothing}
       </ha-card>
     `;
   }
@@ -1254,6 +1504,22 @@ export class AdvancedPowerFlowCard extends LitElement {
       color: var(--secondary-text-color);
     }
 
+    .daily-item-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .daily-item-label b {
+      font-size: 9px;
+      color: var(--primary-color);
+    }
+
+    .daily-item.expandable {
+      border-color: color-mix(in srgb, var(--apfc-solar) 28%, var(--divider-color));
+    }
+
     .daily-item strong {
       font-size: 14px;
       color: var(--primary-text-color);
@@ -1277,9 +1543,9 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .cluster-bg {
-      fill: color-mix(in srgb, var(--apfc-solar) 4%, var(--secondary-background-color));
-      stroke: color-mix(in srgb, var(--apfc-solar) 20%, var(--divider-color));
-      stroke-width: 1.2;
+      fill: color-mix(in srgb, var(--apfc-solar) 2%, var(--secondary-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 16%, var(--divider-color));
+      stroke-width: 1.15;
     }
 
     .flow-base {
@@ -1365,16 +1631,28 @@ export class AdvancedPowerFlowCard extends LitElement {
     .node.unknown .node-main,
     .node.unknown .node-sub { opacity: .62; }
 
-    .node-bg.pv,
-    .node-bg.pv-parent {
-      fill: color-mix(in srgb, var(--apfc-solar) 8%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--apfc-solar) 46%, var(--divider-color));
+    .node-bg.pv {
+      fill: color-mix(in srgb, var(--apfc-solar) 3%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 30%, var(--divider-color));
+      stroke-width: 1.2;
+      filter: none;
     }
 
     .node-bg.pv-parent {
-      fill: color-mix(in srgb, var(--apfc-solar) 12%, var(--card-background-color));
-      stroke-width: 1.8;
+      fill: color-mix(in srgb, var(--apfc-solar) 17%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 70%, var(--divider-color));
+      stroke-width: 2.35;
+      filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--apfc-solar) 16%, transparent));
     }
+
+    .node.pv-parent .node-title,
+    .node.pv-parent .node-main {
+      font-weight: 800;
+    }
+
+    .node.pv-parent.idle .node-bg { opacity: .76; }
+    .node.pv-parent.idle .node-title { opacity: .86; }
+    .node.pv-parent.idle .node-main { opacity: .82; }
 
     .node-bg.center {
       fill: color-mix(in srgb, var(--primary-color) 16%, var(--card-background-color));
@@ -1456,6 +1734,15 @@ export class AdvancedPowerFlowCard extends LitElement {
       fill: color-mix(in srgb, var(--primary-color) 76%, var(--primary-text-color));
       font-size: var(--apfc-badge-size);
       font-weight: 700;
+    }
+
+    .node.pv-parent .status-badge rect {
+      fill: color-mix(in srgb, var(--apfc-solar) 22%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 68%, var(--divider-color));
+    }
+
+    .node.pv-parent .status-badge text {
+      fill: color-mix(in srgb, var(--apfc-solar) 78%, var(--primary-text-color));
     }
 
     .node.heat .status-badge rect {
@@ -1581,9 +1868,45 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .detail-item:hover { border-color: var(--primary-color); }
+    .detail-item.static { cursor: default; }
+    .detail-item.static:hover { border-color: var(--divider-color); }
     .detail-item span { font-size: 12px; color: var(--secondary-text-color); }
     .detail-item strong { font-size: 16px; color: var(--primary-text-color); }
-    .empty-detail { color: var(--secondary-text-color); font-size: 13px; }
+    .detail-item small { font-size: 11px; color: var(--secondary-text-color); }
+    .detail-item.missing { opacity: .62; }
+    .empty-detail { color: var(--secondary-text-color); font-size: 13px; line-height: 1.5; }
+
+    .battery-details {
+      border-color: color-mix(in srgb, var(--apfc-battery) 30%, var(--divider-color));
+    }
+
+    .pv-daily-details {
+      border-color: color-mix(in srgb, var(--apfc-solar) 34%, var(--divider-color));
+    }
+
+    .pv-daily-system {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pv-share-track {
+      height: 4px;
+      margin-top: 2px;
+      border-radius: 2px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
+    }
+
+    .pv-share-track i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--apfc-solar);
+    }
+
+    .details-entity-button {
+      margin-top: 12px;
+    }
 
     @media (max-width: 700px) {
       ha-card { padding: 12px; }

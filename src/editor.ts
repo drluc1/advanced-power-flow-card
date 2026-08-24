@@ -262,6 +262,11 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                     system.power,
                     (value) => this._updateSolar(solarIndex, { power: value })
                   )}
+                  ${this._entityPicker(
+                    "Tagesproduktion",
+                    system.daily_energy,
+                    (value) => this._updateSolar(solarIndex, { daily_energy: value })
+                  )}
                 </div>
 
                 <div class="subhead">
@@ -373,6 +378,24 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                     (value) => this._updateBattery(index, { positive_is_charging: value })
                   )}
                 </div>
+
+                <details class="optional-details">
+                  <summary>Batterie-Detaildaten</summary>
+                  <div class="form-grid detail-form">
+                    ${this._entityPicker("Batteriespannung", battery.voltage, (value) => this._updateBattery(index, { voltage: value }))}
+                    ${this._entityPicker("Batteriestrom", battery.current, (value) => this._updateBattery(index, { current: value }))}
+                    ${this._entityPicker("Temperatur", battery.temperature, (value) => this._updateBattery(index, { temperature: value }))}
+                    ${this._entityPicker("Zellspannung Minimum", battery.cell_min_voltage, (value) => this._updateBattery(index, { cell_min_voltage: value }))}
+                    ${this._entityPicker("Zellspannung Maximum", battery.cell_max_voltage, (value) => this._updateBattery(index, { cell_max_voltage: value }))}
+                    ${this._entityPicker("Zelltemperatur Minimum", battery.cell_min_temperature, (value) => this._updateBattery(index, { cell_min_temperature: value }))}
+                    ${this._entityPicker("Zelltemperatur Maximum", battery.cell_max_temperature, (value) => this._updateBattery(index, { cell_max_temperature: value }))}
+                    ${this._entityPicker("State of Health (SOH)", battery.state_of_health, (value) => this._updateBattery(index, { state_of_health: value }))}
+                    ${this._entityPicker("Zyklen", battery.cycle_count, (value) => this._updateBattery(index, { cycle_count: value }))}
+                    ${this._entityPicker("Restenergie", battery.remaining_energy, (value) => this._updateBattery(index, { remaining_energy: value }))}
+                    ${this._entityPicker("Ladeenergie heute", battery.daily_charge_energy, (value) => this._updateBattery(index, { daily_charge_energy: value }))}
+                    ${this._entityPicker("Entladeenergie heute", battery.daily_discharge_energy, (value) => this._updateBattery(index, { daily_discharge_energy: value }))}
+                  </div>
+                </details>
               </div>
             `)}
           </div>
@@ -452,6 +475,7 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             )}
             <div class="help">
               Nur konfigurierte Tageswerte werden über dem Flussdiagramm angezeigt.
+              Die Aufschlüsselung von „PV heute“ wird über die Tagesproduktion der einzelnen PV-Systeme konfiguriert.
             </div>
           </div>
         </section>
@@ -592,6 +616,19 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
       gap: 8px;
       align-items: center;
     }
+    .optional-details {
+      margin-top: 12px;
+      border-top: 1px solid var(--divider-color);
+      padding-top: 10px;
+    }
+    .optional-details summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--primary-text-color);
+      user-select: none;
+    }
+    .detail-form { margin-top: 12px; }
     @media (max-width: 680px) {
       section, .form-grid { grid-template-columns: 1fr; }
       .section-title, .full, .stack, .check { grid-column: 1; }

@@ -18,6 +18,7 @@ export interface PvInputConfig {
 export interface PvSystemConfig {
   name?: string;
   power?: string;
+  daily_energy?: string;
   children?: PvInputConfig[];
 }
 
@@ -26,6 +27,18 @@ export interface BatteryConfig {
   power?: string;
   soc?: string;
   positive_is_charging?: boolean;
+  voltage?: string;
+  current?: string;
+  temperature?: string;
+  cell_min_voltage?: string;
+  cell_max_voltage?: string;
+  cell_min_temperature?: string;
+  cell_max_temperature?: string;
+  state_of_health?: string;
+  cycle_count?: string;
+  remaining_energy?: string;
+  daily_charge_energy?: string;
+  daily_discharge_energy?: string;
 }
 
 export interface GridConfig {

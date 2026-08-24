@@ -2,9 +2,12 @@
 
 Home Assistant Lovelace card for flexible visualization of energy flows.
 
-## v0.2.4 highlights
+## v0.2.5 highlights
 
 - Any number of PV systems and MPPT/sub-PV inputs.
+- Clearer PV hierarchy: MPPTs are visually separated from each PV system's total-production node.
+- Click `PV heute` to expand per-system daily production and percentage shares.
+- Battery nodes now open a detailed BMS-style panel with optional cell, temperature, SOH and cycle data.
 - PV systems and MPPTs wrap into additional rows instead of widening the diagram.
 - No internal horizontal scrollbar: the complete diagram scales to the card width.
 - Compact node sizing between the v0.1 and v0.2 designs.
@@ -46,6 +49,7 @@ A PV system can have its own total-power entity and any number of child MPPTs:
 solar:
   - name: GoodWe
     power: sensor.goodwe_pv_power
+    daily_energy: sensor.goodwe_pv_energy_today
     children:
       - name: MPPT 1
         power: sensor.goodwe_pv1_power
@@ -57,12 +61,15 @@ solar:
         current: sensor.goodwe_pv2_current
 
   - name: Victron
+    daily_energy: sensor.victron_pv_energy_today
     children:
       - name: MPPT Garage
         power: sensor.victron_mppt_garage_power
 ```
 
 If the PV-system `power` entity is missing or unavailable, the card automatically sums the available child MPPT powers.
+
+`daily_energy` is optional. When configured per PV system, clicking the `PV heute` summary tile opens a breakdown of the daily production of all PV systems. If a total PV daily-energy entity is available, the card also shows each system's percentage share.
 
 ## Batteries
 
@@ -72,9 +79,21 @@ batteries:
     power: sensor.battery_1_power
     soc: sensor.battery_1_soc
     positive_is_charging: true
+    voltage: sensor.battery_1_voltage
+    current: sensor.battery_1_current
+    temperature: sensor.battery_1_temperature
+    cell_min_voltage: sensor.battery_1_cell_min_voltage
+    cell_max_voltage: sensor.battery_1_cell_max_voltage
+    cell_min_temperature: sensor.battery_1_cell_min_temperature
+    cell_max_temperature: sensor.battery_1_cell_max_temperature
+    state_of_health: sensor.battery_1_soh
+    cycle_count: sensor.battery_1_cycles
+    remaining_energy: sensor.battery_1_remaining_energy
+    daily_charge_energy: sensor.battery_1_charge_today
+    daily_discharge_energy: sensor.battery_1_discharge_today
 ```
 
-`positive_is_charging: true` means positive power is charging and negative power is discharging.
+`positive_is_charging: true` means positive power is charging and negative power is discharging. Click a battery node to open the optional detail values. When minimum and maximum cell voltage are configured, the card also calculates the current cell-voltage delta.
 
 ## House consumption
 
@@ -156,4 +175,4 @@ daily:
   house_energy: sensor.house_energy_today
 ```
 
-The values appear as compact tiles above the live flow diagram and can be clicked to open the corresponding Home Assistant entity.
+The values appear as compact tiles above the live flow diagram. `PV heute` opens the per-system production breakdown; the other tiles open their Home Assistant entities.
