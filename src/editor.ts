@@ -365,12 +365,16 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
               })
             )}
             ${this._entityPicker(
-              "Hausleistung",
+              "Hausleistung (optional)",
               this._config.house?.power,
               (value) => this._with((config) => {
                 config.house = { ...config.house, power: value };
               })
             )}
+            <div class="help">
+              Leer lassen = Hausverbrauch automatisch aus PV, Netz und Batterien berechnen.
+              Separate Verbraucher mit „Teil des Hausverbrauchs“ werden dabei nicht doppelt gezählt.
+            </div>
           </div>
         </section>
 
@@ -458,6 +462,12 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     .section-title { grid-column: 1 / -1; }
     h3 { margin: 0; font-size: 16px; }
     label { align-self: center; font-size: 14px; }
+    .help {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--secondary-text-color);
+    }
     input[type="text"], input[type="number"] {
       box-sizing: border-box;
       width: 100%;

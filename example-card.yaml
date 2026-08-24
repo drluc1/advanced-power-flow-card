@@ -46,7 +46,7 @@ grid:
 
 house:
   name: Haus
-  power: sensor.house_power
+  # power leer lassen -> automatische Berechnung aus PV, Netz und Batterien
 
 heat_pump:
   name: Wärmepumpe

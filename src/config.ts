@@ -138,8 +138,7 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
       positive_is_import: true
     },
     house: {
-      name: "Haus",
-      power: "sensor.house_power"
+      name: "Haus"
     },
     heat_pump: {
       name: "Wärmepumpe",

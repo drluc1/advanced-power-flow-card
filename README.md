@@ -2,15 +2,15 @@
 
 Home Assistant Lovelace card for flexible visualization of energy flows.
 
-## v0.2.0 highlights
+## v0.2.1 highlights
 
-- Any number of PV systems.
-- Any number of MPPT/sub-PV inputs inside each PV system.
-- Any number of batteries.
-- Optional generic consumers.
+- Any number of PV systems and MPPT/sub-PV inputs.
+- PV systems and MPPTs wrap into additional rows instead of widening the diagram.
+- No internal horizontal scrollbar: the complete diagram scales to the card width.
+- Compact node sizing between the v0.1 and v0.2 designs.
+- Any number of batteries and optional generic consumers.
 - Dedicated heat-pump node with expandable operating details.
-- Larger typography, nodes and power-flow lines.
-- The diagram keeps nodes readable instead of shrinking them indefinitely. If many nodes are configured, the diagram becomes horizontally scrollable.
+- House consumption can be calculated automatically from PV, grid and battery power when no house-power entity is configured.
 - Graphical editor supports adding/removing PV systems, MPPTs, batteries and consumers.
 - v0.1 configurations are migrated automatically when loaded.
 
@@ -66,6 +66,23 @@ batteries:
 ```
 
 `positive_is_charging: true` means positive power is charging and negative power is discharging.
+
+## House consumption
+
+The house-power entity is optional:
+
+```yaml
+house:
+  name: Haus
+```
+
+When `house.power` is omitted, the card calculates the house demand using the energy balance:
+
+```text
+house = PV + grid import - grid export + battery discharge - battery charging
+```
+
+Consumers configured with `part_of_house: false` are subtracted from this value so they are not counted twice. The calculation uses the configured grid and battery sign conventions.
 
 ## Heat pump
 
