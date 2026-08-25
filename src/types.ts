@@ -13,12 +13,15 @@ export interface PvInputConfig {
   power?: string;
   voltage?: string;
   current?: string;
+  installed_kwp?: number;
 }
 
 export interface PvSystemConfig {
   name?: string;
   power?: string;
   daily_energy?: string;
+  daily_peak_power?: string;
+  installed_kwp?: number;
   children?: PvInputConfig[];
 }
 
@@ -39,6 +42,7 @@ export interface BatteryConfig {
   remaining_energy?: string;
   daily_charge_energy?: string;
   daily_discharge_energy?: string;
+  capacity_kwh?: number;
 }
 
 export interface GridConfig {
@@ -59,7 +63,27 @@ export interface DailyStatsConfig {
   house_energy?: string;
 }
 
+export interface DiagnosticsConfig {
+  enabled?: boolean;
+  pv_voltage_without_power_threshold?: number;
+  battery_cell_delta_warning?: number;
+  battery_temperature_low?: number;
+  battery_temperature_high?: number;
+  mppt_relative_warning_enabled?: boolean;
+  mppt_relative_warning_ratio?: number;
+}
+
+export interface CardColorsConfig {
+  solar?: string;
+  grid?: string;
+  battery?: string;
+  heat_pump?: string;
+  consumer?: string;
+  flow?: string;
+}
+
 export type TextSize = "small" | "normal" | "large";
+export type DailyLayout = "auto" | "cards" | "compact";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -87,9 +111,13 @@ export interface AdvancedPowerFlowCardConfig {
   heat_pump?: HeatPumpConfig;
   consumers?: ConsumerConfig[];
   daily?: DailyStatsConfig;
+  diagnostics?: DiagnosticsConfig;
+  colors?: CardColorsConfig;
   power_threshold?: number;
   balance_warning_threshold?: number;
   text_size?: TextSize;
+  daily_layout?: DailyLayout;
+  night_mode?: boolean;
 }
 
 declare global {

@@ -620,6 +620,7 @@ function normalizeConfig(input) {
 		if (raw.battery1 && typeof raw.battery1 === "object") batteries.push(raw.battery1);
 		if (raw.battery2 && typeof raw.battery2 === "object") batteries.push(raw.battery2);
 	}
+	const diagnosticsRaw = raw.diagnostics && typeof raw.diagnostics === "object" ? raw.diagnostics : {};
 	return {
 		type: typeof raw.type === "string" ? raw.type : "custom:advanced-power-flow-card",
 		title: typeof raw.title === "string" ? raw.title : "Energiefluss",
@@ -630,9 +631,21 @@ function normalizeConfig(input) {
 		heat_pump: raw.heat_pump && typeof raw.heat_pump === "object" ? raw.heat_pump : void 0,
 		consumers: Array.isArray(raw.consumers) ? raw.consumers : [],
 		daily: raw.daily && typeof raw.daily === "object" ? raw.daily : void 0,
+		diagnostics: {
+			enabled: typeof diagnosticsRaw.enabled === "boolean" ? diagnosticsRaw.enabled : true,
+			pv_voltage_without_power_threshold: typeof diagnosticsRaw.pv_voltage_without_power_threshold === "number" ? diagnosticsRaw.pv_voltage_without_power_threshold : 80,
+			battery_cell_delta_warning: typeof diagnosticsRaw.battery_cell_delta_warning === "number" ? diagnosticsRaw.battery_cell_delta_warning : .05,
+			battery_temperature_low: typeof diagnosticsRaw.battery_temperature_low === "number" ? diagnosticsRaw.battery_temperature_low : 5,
+			battery_temperature_high: typeof diagnosticsRaw.battery_temperature_high === "number" ? diagnosticsRaw.battery_temperature_high : 45,
+			mppt_relative_warning_enabled: typeof diagnosticsRaw.mppt_relative_warning_enabled === "boolean" ? diagnosticsRaw.mppt_relative_warning_enabled : false,
+			mppt_relative_warning_ratio: typeof diagnosticsRaw.mppt_relative_warning_ratio === "number" ? diagnosticsRaw.mppt_relative_warning_ratio : .35
+		},
+		colors: raw.colors && typeof raw.colors === "object" ? raw.colors : void 0,
 		power_threshold: typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold) ? raw.power_threshold : 5,
 		balance_warning_threshold: typeof raw.balance_warning_threshold === "number" && Number.isFinite(raw.balance_warning_threshold) ? raw.balance_warning_threshold : 50,
-		text_size: raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" ? raw.text_size : "large"
+		text_size: raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" ? raw.text_size : "large",
+		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
+		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
 	};
 }
 function createStubConfig() {
@@ -642,24 +655,28 @@ function createStubConfig() {
 		solar: [{
 			name: "GoodWe",
 			power: "sensor.goodwe_pv_power",
+			installed_kwp: 6,
 			children: [
 				{
 					name: "MPPT 1",
 					power: "sensor.goodwe_pv1_power",
 					voltage: "sensor.goodwe_pv1_voltage",
-					current: "sensor.goodwe_pv1_current"
+					current: "sensor.goodwe_pv1_current",
+					installed_kwp: 2
 				},
 				{
 					name: "MPPT 2",
 					power: "sensor.goodwe_pv2_power",
 					voltage: "sensor.goodwe_pv2_voltage",
-					current: "sensor.goodwe_pv2_current"
+					current: "sensor.goodwe_pv2_current",
+					installed_kwp: 2
 				},
 				{
 					name: "MPPT 3",
 					power: "sensor.goodwe_pv3_power",
 					voltage: "sensor.goodwe_pv3_voltage",
-					current: "sensor.goodwe_pv3_current"
+					current: "sensor.goodwe_pv3_current",
+					installed_kwp: 2
 				}
 			]
 		}, {
@@ -709,9 +726,20 @@ function createStubConfig() {
 		},
 		consumers: [],
 		daily: {},
+		diagnostics: {
+			enabled: true,
+			pv_voltage_without_power_threshold: 80,
+			battery_cell_delta_warning: .05,
+			battery_temperature_low: 5,
+			battery_temperature_high: 45,
+			mppt_relative_warning_enabled: false,
+			mppt_relative_warning_ratio: .35
+		},
 		power_threshold: 5,
 		balance_warning_threshold: 50,
-		text_size: "large"
+		text_size: "large",
+		daily_layout: "cards",
+		night_mode: true
 	};
 }
 //#endregion
@@ -770,16 +798,37 @@ var AdvancedPowerFlowCardEditor = class extends i {
       />
     `;
 	}
-	_numberInput(label, value, fallback, onChange) {
+	_numberInput(label, value, fallback, onChange, options = {}) {
 		return b`
       <label>${label}</label>
       <input
         type="number"
-        min="0"
-        step="1"
+        min=${String(options.min ?? 0)}
+        step=${String(options.step ?? 1)}
         .value=${String(value ?? fallback)}
         @input=${(event) => {
 			const parsed = Number(event.target.value);
+			if (Number.isFinite(parsed)) onChange(parsed);
+		}}
+      />
+    `;
+	}
+	_optionalNumberInput(label, value, placeholder, onChange, options = {}) {
+		return b`
+      <label>${label}</label>
+      <input
+        type="number"
+        min=${String(options.min ?? 0)}
+        step=${String(options.step ?? .01)}
+        .value=${value === void 0 ? "" : String(value)}
+        placeholder=${placeholder}
+        @input=${(event) => {
+			const text = event.target.value;
+			if (!text.trim()) {
+				onChange(void 0);
+				return;
+			}
+			const parsed = Number(text);
 			if (Number.isFinite(parsed)) onChange(parsed);
 		}}
       />
@@ -792,11 +841,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
         .value=${value ?? options[0]?.value ?? ""}
         @change=${(event) => onChange(event.target.value)}
       >
-        ${options.map((option) => b`
-          <option value=${option.value} ?selected=${(value ?? options[0]?.value) === option.value}>
-            ${option.label}
-          </option>
-        `)}
+        ${options.map((option) => b`<option value=${option.value}>${option.label}</option>`)}
       </select>
     `;
 	}
@@ -825,6 +870,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		this._with((config) => {
 			config.solar ??= [];
 			const system = config.solar[solarIndex];
+			if (!system) return;
 			system.children ??= [];
 			system.children[inputIndex] = {
 				...system.children[inputIndex],
@@ -863,9 +909,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		return b`
       <div class="editor">
         <section>
-          <div class="section-title">
-            <h3>Allgemein</h3>
-          </div>
+          <div class="section-title"><h3>Allgemein</h3></div>
           ${this._textInput("Titel", this._config.title, "Energiefluss", (value) => this._with((config) => {
 			config.title = value;
 		}))}
@@ -891,21 +935,37 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		], (value) => this._with((config) => {
 			config.text_size = value;
 		}))}
+          ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
+			{
+				value: "auto",
+				label: "Automatisch (mobil kompakt)"
+			},
+			{
+				value: "cards",
+				label: "Karten"
+			},
+			{
+				value: "compact",
+				label: "Kompakt"
+			}
+		], (value) => this._with((config) => {
+			config.daily_layout = value;
+		}))}
+          ${this._checkbox("PV bei Nacht stärker ausblenden", this._config.night_mode, true, (value) => this._with((config) => {
+			config.night_mode = value;
+		}))}
         </section>
 
         <section>
           <div class="section-title">
             <h3>PV-Systeme</h3>
-            <button
-              class="add"
-              @click=${() => this._with((config) => {
+            <button class="add" @click=${() => this._with((config) => {
 			config.solar ??= [];
 			config.solar.push({
 				name: `PV ${config.solar.length + 1}`,
 				children: []
 			});
-		})}
-            >+ PV-System</button>
+		})}>+ PV-System</button>
           </div>
 
           <div class="stack full">
@@ -913,31 +973,26 @@ var AdvancedPowerFlowCardEditor = class extends i {
               <div class="group">
                 <div class="group-head">
                   <strong>${system.name || `PV ${solarIndex + 1}`}</strong>
-                  <button
-                    class="danger"
-                    @click=${() => this._with((config) => {
+                  <button class="danger" @click=${() => this._with((config) => {
 			config.solar?.splice(solarIndex, 1);
-		})}
-                  >Entfernen</button>
+		})}>Entfernen</button>
                 </div>
-
                 <div class="form-grid">
                   ${this._textInput("Name", system.name, `PV ${solarIndex + 1}`, (value) => this._updateSolar(solarIndex, { name: value }))}
                   ${this._entityPicker("Gesamtleistung (optional)", system.power, (value) => this._updateSolar(solarIndex, { power: value }))}
                   ${this._entityPicker("Tagesproduktion", system.daily_energy, (value) => this._updateSolar(solarIndex, { daily_energy: value }))}
+                  ${this._entityPicker("Peak-Leistung heute", system.daily_peak_power, (value) => this._updateSolar(solarIndex, { daily_peak_power: value }))}
+                  ${this._optionalNumberInput("Installierte Leistung [kWp]", system.installed_kwp, "z. B. 4.95", (value) => this._updateSolar(solarIndex, { installed_kwp: value }), { step: .01 })}
                 </div>
 
                 <div class="subhead">
                   <span>Sub-PV / MPPTs</span>
-                  <button
-                    class="add small"
-                    @click=${() => this._with((config) => {
+                  <button class="add small" @click=${() => this._with((config) => {
 			const target = config.solar?.[solarIndex];
 			if (!target) return;
 			target.children ??= [];
 			target.children.push({ name: `MPPT ${target.children.length + 1}` });
-		})}
-                  >+ MPPT</button>
+		})}>+ MPPT</button>
                 </div>
 
                 <div class="stack">
@@ -945,18 +1000,16 @@ var AdvancedPowerFlowCardEditor = class extends i {
                     <div class="subgroup">
                       <div class="group-head compact">
                         <strong>${input.name || `MPPT ${inputIndex + 1}`}</strong>
-                        <button
-                          class="danger small"
-                          @click=${() => this._with((config) => {
+                        <button class="danger small" @click=${() => this._with((config) => {
 			config.solar?.[solarIndex]?.children?.splice(inputIndex, 1);
-		})}
-                        >Entfernen</button>
+		})}>Entfernen</button>
                       </div>
                       <div class="form-grid">
                         ${this._textInput("Name", input.name, `MPPT ${inputIndex + 1}`, (value) => this._updateMppt(solarIndex, inputIndex, { name: value }))}
                         ${this._entityPicker("Leistung", input.power, (value) => this._updateMppt(solarIndex, inputIndex, { power: value }))}
                         ${this._entityPicker("Spannung", input.voltage, (value) => this._updateMppt(solarIndex, inputIndex, { voltage: value }))}
                         ${this._entityPicker("Strom", input.current, (value) => this._updateMppt(solarIndex, inputIndex, { current: value }))}
+                        ${this._optionalNumberInput("Installierte Leistung [kWp]", input.installed_kwp, "optional", (value) => this._updateMppt(solarIndex, inputIndex, { installed_kwp: value }), { step: .01 })}
                       </div>
                     </div>
                   `)}
@@ -969,16 +1022,13 @@ var AdvancedPowerFlowCardEditor = class extends i {
         <section>
           <div class="section-title">
             <h3>Batterien</h3>
-            <button
-              class="add"
-              @click=${() => this._with((config) => {
+            <button class="add" @click=${() => this._with((config) => {
 			config.batteries ??= [];
 			config.batteries.push({
 				name: `Batterie ${config.batteries.length + 1}`,
 				positive_is_charging: true
 			});
-		})}
-            >+ Batterie</button>
+		})}>+ Batterie</button>
           </div>
 
           <div class="stack full">
@@ -986,17 +1036,15 @@ var AdvancedPowerFlowCardEditor = class extends i {
               <div class="group">
                 <div class="group-head">
                   <strong>${battery.name || `Batterie ${index + 1}`}</strong>
-                  <button
-                    class="danger"
-                    @click=${() => this._with((config) => {
+                  <button class="danger" @click=${() => this._with((config) => {
 			config.batteries?.splice(index, 1);
-		})}
-                  >Entfernen</button>
+		})}>Entfernen</button>
                 </div>
                 <div class="form-grid">
                   ${this._textInput("Name", battery.name, `Batterie ${index + 1}`, (value) => this._updateBattery(index, { name: value }))}
                   ${this._entityPicker("Leistung", battery.power, (value) => this._updateBattery(index, { power: value }))}
                   ${this._entityPicker("SOC", battery.soc, (value) => this._updateBattery(index, { soc: value }))}
+                  ${this._optionalNumberInput("Nutzbare Kapazität [kWh]", battery.capacity_kwh, "optional", (value) => this._updateBattery(index, { capacity_kwh: value }), { step: .1 })}
                   ${this._checkbox("Positiver Wert bedeutet Laden", battery.positive_is_charging, true, (value) => this._updateBattery(index, { positive_is_charging: value }))}
                 </div>
 
@@ -1049,16 +1097,12 @@ var AdvancedPowerFlowCardEditor = class extends i {
 				power: value
 			};
 		}))}
-            <div class="help">
-              Leer lassen = Hausverbrauch automatisch aus PV, Netz und Batterien berechnen.
-              Separate Verbraucher mit „Teil des Hausverbrauchs“ werden dabei nicht doppelt gezählt.
-            </div>
+            <div class="help">Leer lassen = Hausverbrauch automatisch aus PV, Netz und Batterien berechnen.</div>
           </div>
         </section>
 
-
         <section>
-          <div class="section-title"><h3>Tageswerte (optional)</h3></div>
+          <div class="section-title"><h3>Tageswerte</h3></div>
           <div class="form-grid full">
             ${this._entityPicker("PV-Energie heute", this._config.daily?.pv_energy, (value) => this._with((config) => {
 			config.daily = {
@@ -1084,10 +1128,101 @@ var AdvancedPowerFlowCardEditor = class extends i {
 				house_energy: value
 			};
 		}))}
-            <div class="help">
-              Nur konfigurierte Tageswerte werden über dem Flussdiagramm angezeigt.
-              Die Aufschlüsselung von „PV heute“ wird über die Tagesproduktion der einzelnen PV-Systeme konfiguriert.
-            </div>
+            <div class="help">Mit Hausverbrauch + Netzbezug werden Autarkie, mit PV + Einspeisung der Eigenverbrauch automatisch berechnet.</div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title"><h3>Diagnose & Warnungen</h3></div>
+          <div class="form-grid full">
+            ${this._checkbox("Diagnose aktivieren", this._config.diagnostics?.enabled, true, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				enabled: value
+			};
+		}))}
+            ${this._numberInput("PV-Spannung ohne Leistung [V]", this._config.diagnostics?.pv_voltage_without_power_threshold, 80, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				pv_voltage_without_power_threshold: value
+			};
+		}))}
+            ${this._numberInput("Zellspannungs-Delta Warnung [V]", this._config.diagnostics?.battery_cell_delta_warning, .05, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				battery_cell_delta_warning: value
+			};
+		}), { step: .005 })}
+            ${this._numberInput("Batterietemperatur Minimum [°C]", this._config.diagnostics?.battery_temperature_low, 5, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				battery_temperature_low: value
+			};
+		}), {
+			min: -40,
+			step: 1
+		})}
+            ${this._numberInput("Batterietemperatur Maximum [°C]", this._config.diagnostics?.battery_temperature_high, 45, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				battery_temperature_high: value
+			};
+		}))}
+            ${this._checkbox("MPPT-Abweichungsdiagnose aktivieren", this._config.diagnostics?.mppt_relative_warning_enabled, false, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				mppt_relative_warning_enabled: value
+			};
+		}))}
+            ${this._numberInput("MPPT-Warnverhältnis", this._config.diagnostics?.mppt_relative_warning_ratio, .35, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				mppt_relative_warning_ratio: value
+			};
+		}), { step: .05 })}
+            <div class="help">Die MPPT-Abweichungsdiagnose ist standardmäßig aus. Mit kWp-Angaben vergleicht sie W/kWp; ohne kWp nur Rohleistung und kann bei unterschiedlichen Ausrichtungen Fehlalarme erzeugen.</div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title"><h3>Farben (optional)</h3></div>
+          <div class="form-grid full">
+            ${this._textInput("PV", this._config.colors?.solar, "z. B. #f6b800", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				solar: value
+			};
+		}))}
+            ${this._textInput("Netz", this._config.colors?.grid, "CSS-Farbe", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				grid: value
+			};
+		}))}
+            ${this._textInput("Batterie", this._config.colors?.battery, "CSS-Farbe", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				battery: value
+			};
+		}))}
+            ${this._textInput("Wärmepumpe", this._config.colors?.heat_pump, "CSS-Farbe", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				heat_pump: value
+			};
+		}))}
+            ${this._textInput("Verbraucher", this._config.colors?.consumer, "CSS-Farbe", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				consumer: value
+			};
+		}))}
+            ${this._textInput("Energiefluss", this._config.colors?.flow, "CSS-Farbe", (value) => this._with((config) => {
+			config.colors = {
+				...config.colors,
+				flow: value
+			};
+		}))}
           </div>
         </section>
 
@@ -1108,7 +1243,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
             ${this._entityPicker("Kompressorstatus", this._config.heat_pump?.compressor_status, (value) => this._updateHeatPump({ compressor_status: value }))}
             ${this._entityPicker("Kompressorfrequenz", this._config.heat_pump?.compressor_frequency, (value) => this._updateHeatPump({ compressor_frequency: value }))}
             ${this._entityPicker("Thermische Leistung", this._config.heat_pump?.thermal_power, (value) => this._updateHeatPump({ thermal_power: value }))}
-            ${this._entityPicker("COP", this._config.heat_pump?.cop, (value) => this._updateHeatPump({ cop: value }))}
+            ${this._entityPicker("COP (optional, sonst berechnet)", this._config.heat_pump?.cop, (value) => this._updateHeatPump({ cop: value }))}
             ${this._entityPicker("Tagesenergie", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
           </div>
         </section>
@@ -1116,29 +1251,22 @@ var AdvancedPowerFlowCardEditor = class extends i {
         <section>
           <div class="section-title">
             <h3>Weitere Verbraucher</h3>
-            <button
-              class="add"
-              @click=${() => this._with((config) => {
+            <button class="add" @click=${() => this._with((config) => {
 			config.consumers ??= [];
 			config.consumers.push({
 				name: `Verbraucher ${config.consumers.length + 1}`,
 				part_of_house: true
 			});
-		})}
-            >+ Verbraucher</button>
+		})}>+ Verbraucher</button>
           </div>
-
           <div class="stack full">
             ${(this._config.consumers ?? []).map((consumer, index) => b`
               <div class="group">
                 <div class="group-head">
                   <strong>${consumer.name || `Verbraucher ${index + 1}`}</strong>
-                  <button
-                    class="danger"
-                    @click=${() => this._with((config) => {
+                  <button class="danger" @click=${() => this._with((config) => {
 			config.consumers?.splice(index, 1);
-		})}
-                  >Entfernen</button>
+		})}>Entfernen</button>
                 </div>
                 <div class="form-grid">
                   ${this._textInput("Name", consumer.name, `Verbraucher ${index + 1}`, (value) => this._updateConsumer(index, { name: value }))}
@@ -1164,9 +1292,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
       border: 1px solid var(--divider-color);
       border-radius: 14px;
     }
-    .section-title,
-    .group-head,
-    .subhead {
+    .section-title, .group-head, .subhead {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -1227,18 +1353,8 @@ var AdvancedPowerFlowCardEditor = class extends i {
       gap: 8px;
       align-items: center;
     }
-    .optional-details {
-      margin-top: 12px;
-      border-top: 1px solid var(--divider-color);
-      padding-top: 10px;
-    }
-    .optional-details summary {
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 650;
-      color: var(--primary-text-color);
-      user-select: none;
-    }
+    .optional-details { margin-top: 12px; border-top: 1px solid var(--divider-color); padding-top: 10px; }
+    .optional-details summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--primary-text-color); user-select: none; }
     .detail-form { margin-top: 12px; }
     @media (max-width: 680px) {
       section, .form-grid { grid-template-columns: 1fr; }
@@ -1251,7 +1367,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.5";
+var CARD_VERSION = "0.2.6";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1259,6 +1375,7 @@ var AdvancedPowerFlowCard = class extends i {
 		this._heatExpanded = false;
 		this._heatExpansionInitialized = false;
 		this._pvDailyExpanded = false;
+		this._diagnosticsExpanded = false;
 	}
 	static {
 		this.properties = {
@@ -1267,6 +1384,8 @@ var AdvancedPowerFlowCard = class extends i {
 			_heatExpanded: { state: true },
 			_expandedBattery: { state: true },
 			_pvDailyExpanded: { state: true },
+			_expandedPvSystem: { state: true },
+			_diagnosticsExpanded: { state: true },
 			_hoveredNode: { state: true }
 		};
 	}
@@ -1283,6 +1402,7 @@ var AdvancedPowerFlowCard = class extends i {
 			this._heatExpansionInitialized = true;
 		}
 		if (this._expandedBattery !== void 0 && this._expandedBattery >= (this._config.batteries ?? []).length) this._expandedBattery = void 0;
+		if (this._expandedPvSystem !== void 0 && this._expandedPvSystem >= (this._config.solar ?? []).length) this._expandedPvSystem = void 0;
 	}
 	getCardSize() {
 		return this._detailsOpen() ? 8 : 6;
@@ -1296,7 +1416,7 @@ var AdvancedPowerFlowCard = class extends i {
 		};
 	}
 	_detailsOpen() {
-		return this._heatExpanded || this._expandedBattery !== void 0 || this._pvDailyExpanded;
+		return this._heatExpanded || this._expandedBattery !== void 0 || this._pvDailyExpanded || this._expandedPvSystem !== void 0 || this._diagnosticsExpanded;
 	}
 	_state(entityId) {
 		if (!entityId || !this.hass) return void 0;
@@ -1549,6 +1669,138 @@ var AdvancedPowerFlowCard = class extends i {
 		if (values.some((value) => value === void 0)) return void 0;
 		return values.reduce((sum, value) => sum + value, 0);
 	}
+	_autarkyPercent() {
+		const house = this._energyWh(this._config.daily?.house_energy);
+		const gridImport = this._energyWh(this._config.daily?.grid_import_energy);
+		if (house === void 0 || gridImport === void 0 || house <= 0) return void 0;
+		return this._clampPercent((1 - gridImport / house) * 100);
+	}
+	_selfConsumptionPercent() {
+		const pv = this._pvDailyTotalWh();
+		const exportWh = this._energyWh(this._config.daily?.grid_export_energy);
+		if (pv === void 0 || exportWh === void 0 || pv <= 0) return void 0;
+		return this._clampPercent((1 - exportWh / pv) * 100);
+	}
+	_formatPercent(value) {
+		return value === void 0 ? "—" : `${value.toLocaleString(void 0, { maximumFractionDigits: 1 })} %`;
+	}
+	_heatPumpCopInfo(hp) {
+		const direct = this._number(hp.cop);
+		if (direct !== void 0) return {
+			value: direct,
+			calculated: false
+		};
+		const thermal = this._powerW(hp.thermal_power);
+		const electric = Math.abs(this._powerW(hp.power) ?? 0);
+		if (thermal === void 0 || electric <= this._threshold()) return { calculated: true };
+		return {
+			value: Math.abs(thermal) / electric,
+			calculated: true
+		};
+	}
+	_specificYield(system) {
+		const energyWh = this._energyWh(system.daily_energy);
+		if (energyWh === void 0 || !system.installed_kwp || system.installed_kwp <= 0) return void 0;
+		return energyWh / 1e3 / system.installed_kwp;
+	}
+	_entityUnavailable(entity) {
+		if (!entity) return false;
+		const state = this._state(entity);
+		return !state || state.state === "unknown" || state.state === "unavailable";
+	}
+	_mpptDiagnostic(system, input, inputIndex) {
+		const diag = this._config.diagnostics;
+		if (diag?.enabled === false) return void 0;
+		if (input.power && this._entityUnavailable(input.power)) return "Leistungssensor nicht verfügbar";
+		if (input.voltage && this._entityUnavailable(input.voltage)) return "Spannungssensor nicht verfügbar";
+		const p = Math.abs(this._powerW(input.power) ?? 0);
+		const voltage = this._number(input.voltage);
+		const voltageLimit = Math.max(0, diag?.pv_voltage_without_power_threshold ?? 80);
+		if (voltage !== void 0 && voltage >= voltageLimit && p <= this._threshold()) return `Spannung ${this._formatMeasurement(input.voltage, "V")}, aber keine relevante Leistung`;
+		if (!(diag?.mppt_relative_warning_enabled ?? false)) return void 0;
+		const children = system.children ?? [];
+		if (children.length < 2) return void 0;
+		const allHaveKwp = children.every((child) => (child.installed_kwp ?? 0) > 0);
+		const values = children.map((child) => {
+			const power = Math.abs(this._powerW(child.power) ?? 0);
+			return allHaveKwp ? power / Math.max(.001, child.installed_kwp ?? 1) : power;
+		});
+		const sorted = [...values].sort((a, b) => a - b);
+		const median = sorted.length % 2 ? sorted[Math.floor(sorted.length / 2)] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+		const own = values[inputIndex] ?? 0;
+		const ratio = Math.max(0, diag?.mppt_relative_warning_ratio ?? .35);
+		if (median > this._threshold() && own < median * ratio) return allHaveKwp ? "Ertrag pro kWp deutlich unter den anderen MPPTs" : "Leistung deutlich unter den anderen MPPTs";
+	}
+	_batteryWarnings(battery) {
+		const diag = this._config.diagnostics;
+		if (diag?.enabled === false) return [];
+		const warnings = [];
+		if (battery.power && this._entityUnavailable(battery.power)) warnings.push("Leistungssensor nicht verfügbar");
+		if (battery.soc && this._entityUnavailable(battery.soc)) warnings.push("SOC-Sensor nicht verfügbar");
+		const minCell = this._number(battery.cell_min_voltage);
+		const maxCell = this._number(battery.cell_max_voltage);
+		if (minCell !== void 0 && maxCell !== void 0) {
+			const delta = Math.abs(maxCell - minCell);
+			if (delta > Math.max(0, diag?.battery_cell_delta_warning ?? .05)) warnings.push(`Zellspannungs-Delta ${delta.toLocaleString(void 0, { maximumFractionDigits: 4 })} V`);
+		}
+		const temp = this._number(battery.temperature);
+		if (temp !== void 0) {
+			const low = diag?.battery_temperature_low ?? 5;
+			const high = diag?.battery_temperature_high ?? 45;
+			if (temp < low) warnings.push(`Batterietemperatur niedrig (${temp.toLocaleString(void 0, { maximumFractionDigits: 1 })} °C)`);
+			if (temp > high) warnings.push(`Batterietemperatur hoch (${temp.toLocaleString(void 0, { maximumFractionDigits: 1 })} °C)`);
+		}
+		return warnings;
+	}
+	_pvSystemWarnings(system) {
+		const warnings = [];
+		if (system.power && this._entityUnavailable(system.power)) warnings.push("Gesamtleistungssensor nicht verfügbar");
+		(system.children ?? []).forEach((input, index) => {
+			const warning = this._mpptDiagnostic(system, input, index);
+			if (warning) warnings.push(`${input.name ?? `MPPT ${index + 1}`}: ${warning}`);
+		});
+		return warnings;
+	}
+	_diagnosticMessages() {
+		if (this._config.diagnostics?.enabled === false) return [];
+		const messages = [];
+		const balance = this._systemBalanceInfo();
+		if (balance.warning) messages.push({
+			severity: "warning",
+			title: "Leistungsbilanz",
+			detail: `Abweichung ${this._formatSignedW(balance.residual)}`,
+			nodeId: "center"
+		});
+		(this._config.solar ?? []).forEach((system, systemIndex) => {
+			this._pvSystemWarnings(system).forEach((detail) => messages.push({
+				severity: "warning",
+				title: system.name ?? `PV ${systemIndex + 1}`,
+				detail,
+				nodeId: `pv-system-${systemIndex}`
+			}));
+		});
+		(this._config.batteries ?? []).forEach((battery, index) => {
+			this._batteryWarnings(battery).forEach((detail) => messages.push({
+				severity: "warning",
+				title: battery.name ?? `Batterie ${index + 1}`,
+				detail,
+				nodeId: `battery-${index}`
+			}));
+		});
+		if (this._config.grid?.power && this._entityUnavailable(this._config.grid.power)) messages.push({
+			severity: "warning",
+			title: "Netz",
+			detail: "Leistungssensor nicht verfügbar",
+			nodeId: "grid"
+		});
+		if (this._config.house?.power && this._entityUnavailable(this._config.house.power)) messages.push({
+			severity: "warning",
+			title: this._config.house.name ?? "Haus",
+			detail: "Leistungssensor nicht verfügbar",
+			nodeId: "house"
+		});
+		return messages;
+	}
 	_dailyItems() {
 		const daily = this._config.daily;
 		const items = [];
@@ -1586,6 +1838,18 @@ var AdvancedPowerFlowCard = class extends i {
 				entity
 			});
 		}
+		const autarky = this._autarkyPercent();
+		if (autarky !== void 0) items.push({
+			key: "autarky",
+			label: "Autarkie",
+			value: this._formatPercent(autarky)
+		});
+		const selfConsumption = this._selfConsumptionPercent();
+		if (selfConsumption !== void 0) items.push({
+			key: "self-consumption",
+			label: "Eigenverbrauch",
+			value: this._formatPercent(selfConsumption)
+		});
 		return items;
 	}
 	_flowFocusClass(relatedNodes) {
@@ -1636,6 +1900,9 @@ var AdvancedPowerFlowCard = class extends i {
 				const parentX = clusterX + clusterWidth / 2 - parentW / 2;
 				const parentY = pvY + clusterPadY + childrenAreaH + 16;
 				const parentPower = this._pvSystemPowerW(system);
+				const systemWarnings = this._pvSystemWarnings(system);
+				const totalPv = this._totalPvW();
+				const pvShare = parentPower !== void 0 && totalPv !== void 0 && totalPv > this._threshold() ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100) : void 0;
 				const parent = {
 					id: `pv-system-${systemIndex}`,
 					title: system.name ?? `PV ${systemIndex + 1}`,
@@ -1648,7 +1915,10 @@ var AdvancedPowerFlowCard = class extends i {
 					w: parentW,
 					h: parentH,
 					activity: this._activityFromPower(parentPower),
-					badge: "Gesamt"
+					badge: systemWarnings.length ? "⚠ Prüfen" : "Gesamt",
+					warning: systemWarnings.length > 0,
+					pvSystemIndex: systemIndex,
+					pvShare
 				};
 				const childNodes = children.map((child, childIndex) => {
 					const row = Math.floor(childIndex / childColumns);
@@ -1667,7 +1937,8 @@ var AdvancedPowerFlowCard = class extends i {
 						y: pvY + clusterPadY + row * 88,
 						w: childW,
 						h: childH,
-						activity: this._activityFromPower(this._powerW(child.power))
+						activity: this._activityFromPower(this._powerW(child.power)),
+						warning: Boolean(this._mpptDiagnostic(system, child, childIndex))
 					};
 				});
 				pvClusters.push({
@@ -1750,7 +2021,9 @@ var AdvancedPowerFlowCard = class extends i {
 						h: 90,
 						activity: this._activityFromPower(this._powerW(battery.power)),
 						batterySoc: this._clampPercent(this._number(battery.soc)),
-						batteryIndex: index
+						batteryIndex: index,
+						warning: this._batteryWarnings(battery).length > 0,
+						badge: this._batteryWarnings(battery).length ? "⚠ Prüfen" : void 0
 					}
 				})
 			});
@@ -1862,8 +2135,8 @@ var AdvancedPowerFlowCard = class extends i {
 			const unit = this._unit(hp.flow_temperature) || "°C";
 			parts.push(`VL ${flow.toLocaleString(void 0, { maximumFractionDigits: 1 })} ${unit}`);
 		}
-		const cop = this._number(hp.cop);
-		if (cop !== void 0) parts.push(`COP ${cop.toLocaleString(void 0, { maximumFractionDigits: 1 })}`);
+		const copInfo = this._heatPumpCopInfo(hp);
+		if (copInfo.value !== void 0) parts.push(`COP ${copInfo.value.toLocaleString(void 0, { maximumFractionDigits: 1 })}${copInfo.calculated ? "*" : ""}`);
 		return parts.length ? parts.join(" · ") : "Details anzeigen";
 	}
 	_flowPath(d, direction, power, key = "", relatedNodes = []) {
@@ -1894,7 +2167,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const titleY = node.y + 26;
 		const mainY = node.y + 54;
 		const subY = node.y + 73;
-		const clickable = Boolean(node.entity || node.heatPump || node.batteryIndex !== void 0);
+		const clickable = Boolean(node.entity || node.heatPump || node.batteryIndex !== void 0 || node.pvSystemIndex !== void 0);
 		const activity = node.activity ?? "unknown";
 		const socTrackX = node.x + 14;
 		const socTrackY = node.y + node.h - 9;
@@ -1974,7 +2247,11 @@ var AdvancedPowerFlowCard = class extends i {
               class="battery-soc-mark"
             ></line>
           ` : A}
-        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : node.batteryIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>` : A}
+        ${node.kind === "pv-parent" && node.pvShare !== void 0 ? w`
+            <rect x=${socTrackX} y=${socTrackY} width=${socTrackW} height="4.5" rx="2.25" class="pv-node-share-track"></rect>
+            <rect x=${socTrackX} y=${socTrackY} width=${socTrackW * node.pvShare / 100} height="4.5" rx="2.25" class="pv-node-share-fill"></rect>
+          ` : A}
+        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : node.batteryIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>` : node.pvSystemIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>` : A}
       </g>
     `;
 	}
@@ -1985,6 +2262,8 @@ var AdvancedPowerFlowCard = class extends i {
 			if (next) {
 				this._expandedBattery = void 0;
 				this._pvDailyExpanded = false;
+				this._expandedPvSystem = void 0;
+				this._diagnosticsExpanded = false;
 			}
 			return;
 		}
@@ -1994,6 +2273,19 @@ var AdvancedPowerFlowCard = class extends i {
 			if (next !== void 0) {
 				this._heatExpanded = false;
 				this._pvDailyExpanded = false;
+				this._expandedPvSystem = void 0;
+				this._diagnosticsExpanded = false;
+			}
+			return;
+		}
+		if (node.pvSystemIndex !== void 0) {
+			const next = this._expandedPvSystem === node.pvSystemIndex ? void 0 : node.pvSystemIndex;
+			this._expandedPvSystem = next;
+			if (next !== void 0) {
+				this._heatExpanded = false;
+				this._expandedBattery = void 0;
+				this._pvDailyExpanded = false;
+				this._diagnosticsExpanded = false;
 			}
 			return;
 		}
@@ -2047,6 +2339,11 @@ var AdvancedPowerFlowCard = class extends i {
 		const delta = minCell !== void 0 && maxCell !== void 0 ? Math.max(0, maxCell - minCell) : void 0;
 		const deltaUnit = this._unit(battery.cell_max_voltage) || this._unit(battery.cell_min_voltage) || "V";
 		const deltaText = delta === void 0 ? void 0 : `${delta.toLocaleString(void 0, { maximumFractionDigits: 4 })} ${deltaUnit}`;
+		const chargeWh = this._energyWh(battery.daily_charge_energy);
+		const dischargeWh = this._energyWh(battery.daily_discharge_energy);
+		const energyRatio = chargeWh !== void 0 && dischargeWh !== void 0 && chargeWh > 0 ? dischargeWh / chargeWh * 100 : void 0;
+		const equivalentCycles = battery.capacity_kwh && battery.capacity_kwh > 0 && chargeWh !== void 0 && dischargeWh !== void 0 ? (chargeWh + dischargeWh) / (2 * battery.capacity_kwh * 1e3) : void 0;
+		const warnings = this._batteryWarnings(battery);
 		const hasAny = [
 			battery.power,
 			battery.soc,
@@ -2074,6 +2371,7 @@ var AdvancedPowerFlowCard = class extends i {
 			this._expandedBattery = void 0;
 		}}>Schließen</button>
         </div>
+        ${warnings.length ? b`<div class="detail-warning"><strong>⚠ Diagnose</strong><span>${warnings.join(" · ")}</span></div>` : A}
         ${hasAny ? b`
             <div class="detail-grid">
               ${this._detailItem("Leistung", battery.power)}
@@ -2091,6 +2389,8 @@ var AdvancedPowerFlowCard = class extends i {
               ${this._detailItem("Restenergie", battery.remaining_energy)}
               ${this._detailItem("Ladeenergie heute", battery.daily_charge_energy)}
               ${this._detailItem("Entladeenergie heute", battery.daily_discharge_energy)}
+              ${energyRatio !== void 0 ? this._detailValueItem("Entladen / Laden heute", `${energyRatio.toLocaleString(void 0, { maximumFractionDigits: 1 })} %`, "Kein echter Wirkungsgrad; SOC-Verschiebung möglich") : A}
+              ${equivalentCycles !== void 0 ? this._detailValueItem("Äquivalente Zyklen heute", equivalentCycles.toLocaleString(void 0, { maximumFractionDigits: 2 }), `bei ${battery.capacity_kwh?.toLocaleString(void 0, { maximumFractionDigits: 1 })} kWh Kapazität`) : A}
             </div>
           ` : b`<div class="empty-detail">Noch keine Detail-Entities für diese Batterie konfiguriert.</div>`}
       </div>
@@ -2121,6 +2421,8 @@ var AdvancedPowerFlowCard = class extends i {
 			const valueWh = this._energyWh(entity);
 			const share = valueWh !== void 0 && totalWh !== void 0 && totalWh > 0 ? Math.min(100, Math.max(0, valueWh / totalWh * 100)) : void 0;
 			const value = entity ? this._formatEnergy(entity) : "Nicht konfiguriert";
+			const specificYield = this._specificYield(system);
+			const peak = system.daily_peak_power ? this._formatPower(system.daily_peak_power, true) : void 0;
 			return b`
                   <div
                     class=${`detail-item pv-daily-system ${entity ? "" : "static missing"}`}
@@ -2132,6 +2434,11 @@ var AdvancedPowerFlowCard = class extends i {
                         <small>${share.toLocaleString(void 0, { maximumFractionDigits: 1 })} % der Tagesproduktion</small>
                         <div class="pv-share-track"><i style=${`width:${share}%`}></i></div>
                       ` : b`<small>Tagesproduktion des Systems</small>`}
+                    ${specificYield !== void 0 || peak || system.installed_kwp ? b`<div class="pv-daily-meta">
+                          ${system.installed_kwp ? b`<span>${system.installed_kwp.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWp</span>` : A}
+                          ${specificYield !== void 0 ? b`<span>${specificYield.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh/kWp</span>` : A}
+                          ${peak ? b`<span>Peak ${peak}</span>` : A}
+                        </div>` : A}
                   </div>
                 `;
 		})}
@@ -2148,6 +2455,99 @@ var AdvancedPowerFlowCard = class extends i {
               PV-Gesamtsensor öffnen
             </button>
           ` : A}
+      </div>
+    `;
+	}
+	_pvSystemDetails(system, index) {
+		const total = this._pvSystemPowerW(system);
+		const pvTotal = this._totalPvW();
+		const share = total !== void 0 && pvTotal !== void 0 && pvTotal > this._threshold() ? this._clampPercent(Math.max(0, total) / pvTotal * 100) : void 0;
+		const warnings = this._pvSystemWarnings(system);
+		const specificYield = this._specificYield(system);
+		return b`
+      <div class="heat-details pv-system-details">
+        <div class="heat-details-head">
+          <div>
+            <div class="heat-title">☀ ${system.name ?? `PV ${index + 1}`}</div>
+            <div class="heat-subtitle">
+              ${this._formatW(total, true)} aktuell${share !== void 0 ? ` · ${this._formatPercent(share)} der PV-Leistung` : ""}
+            </div>
+          </div>
+          <button @click=${() => {
+			this._expandedPvSystem = void 0;
+		}}>Schließen</button>
+        </div>
+
+        ${warnings.length ? b`<div class="detail-warning"><strong>⚠ Diagnose</strong><span>${warnings.join(" · ")}</span></div>` : b`<div class="detail-ok"><strong>✓ Diagnose</strong><span>Keine Auffälligkeiten erkannt.</span></div>`}
+
+        <div class="detail-grid system-overview-grid">
+          ${this._detailValueItem("Aktuelle Gesamtleistung", this._formatW(total, true))}
+          ${system.daily_energy ? this._detailItem("Produktion heute", system.daily_energy) : A}
+          ${system.daily_peak_power ? this._detailItem("Peak heute", system.daily_peak_power) : A}
+          ${system.installed_kwp ? this._detailValueItem("Installierte Leistung", `${system.installed_kwp.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWp`) : A}
+          ${specificYield !== void 0 ? this._detailValueItem("Spezifischer Ertrag heute", `${specificYield.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh/kWp`) : A}
+          ${share !== void 0 ? this._detailValueItem("Anteil an PV aktuell", this._formatPercent(share)) : A}
+        </div>
+
+        ${(system.children ?? []).length ? b`
+            <div class="details-section-title">MPPTs / Sub-PV</div>
+            <div class="mppt-detail-list">
+              ${(system.children ?? []).map((input, childIndex) => {
+			const power = Math.abs(this._powerW(input.power) ?? 0);
+			const systemPower = Math.abs(total ?? 0);
+			const mpptShare = systemPower > this._threshold() ? this._clampPercent(power / systemPower * 100) : void 0;
+			const normalized = input.installed_kwp && input.installed_kwp > 0 ? power / input.installed_kwp : void 0;
+			const warning = this._mpptDiagnostic(system, input, childIndex);
+			return b`
+                  <div class=${`mppt-detail-row ${warning ? "warning" : ""}`}>
+                    <div class="mppt-detail-head">
+                      <div>
+                        <strong>${input.name ?? `MPPT ${childIndex + 1}`}</strong>
+                        ${warning ? b`<small>⚠ ${warning}</small>` : b`<small>Keine Auffälligkeit</small>`}
+                      </div>
+                      <button ?disabled=${!input.power} @click=${() => input.power && this._openMoreInfo(input.power)}>Entity</button>
+                    </div>
+                    <div class="mppt-detail-values">
+                      <span><b>${this._formatPower(input.power, true)}</b> Leistung</span>
+                      ${input.voltage ? b`<span><b>${this._formatMeasurement(input.voltage, "V")}</b> Spannung</span>` : A}
+                      ${input.current ? b`<span><b>${this._formatMeasurement(input.current, "A")}</b> Strom</span>` : A}
+                      ${input.installed_kwp ? b`<span><b>${input.installed_kwp.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWp</b> installiert</span>` : A}
+                      ${normalized !== void 0 ? b`<span><b>${normalized.toLocaleString(void 0, { maximumFractionDigits: 0 })} W/kWp</b> aktuell</span>` : A}
+                    </div>
+                    ${mpptShare !== void 0 ? b`<div class="pv-share-track"><i style=${`width:${mpptShare}%`}></i></div>` : A}
+                  </div>
+                `;
+		})}
+            </div>
+          ` : b`<div class="empty-detail">Keine MPPT-Unterpunkte konfiguriert.</div>`}
+      </div>
+    `;
+	}
+	_diagnosticsDetails(messages) {
+		return b`
+      <div class="heat-details diagnostics-details">
+        <div class="heat-details-head">
+          <div>
+            <div class="heat-title">⚠ Diagnose</div>
+            <div class="heat-subtitle">${messages.length} Hinweis${messages.length === 1 ? "" : "e"}</div>
+          </div>
+          <button @click=${() => {
+			this._diagnosticsExpanded = false;
+		}}>Schließen</button>
+        </div>
+        <div class="diagnostic-list">
+          ${messages.map((message) => b`
+            <div class="diagnostic-row">
+              <div><strong>${message.title}</strong><span>${message.detail}</span></div>
+              ${message.nodeId ? b`<button @click=${() => {
+			this._hoveredNode = message.nodeId;
+			window.setTimeout(() => {
+				this._hoveredNode = void 0;
+			}, 1800);
+		}}>Markieren</button>` : A}
+            </div>
+          `)}
+        </div>
       </div>
     `;
 	}
@@ -2189,21 +2589,45 @@ var AdvancedPowerFlowCard = class extends i {
               ${this._detailItem("Kompressor", hp.compressor_status)}
               ${this._detailItem("Kompressorfrequenz", hp.compressor_frequency, "Hz")}
               ${this._detailItem("Thermische Leistung", hp.thermal_power)}
-              ${this._detailItem("COP", hp.cop)}
+              ${hp.cop ? this._detailItem("COP", hp.cop) : (() => {
+			const cop = this._heatPumpCopInfo(hp);
+			return cop.value !== void 0 ? this._detailValueItem("COP", cop.value.toLocaleString(void 0, { maximumFractionDigits: 2 }), "aus thermischer / elektrischer Leistung berechnet") : A;
+		})()}
               ${this._detailItem("Tagesenergie", hp.daily_energy)}
             </div>
           ` : b`<div class="empty-detail">Noch keine Detail-Entities für die Wärmepumpe konfiguriert.</div>`}
       </div>
     `;
 	}
+	_isPvNight() {
+		if (this._config.night_mode === false) return false;
+		const pv = this._totalPvW();
+		return pv !== void 0 && Math.abs(pv) <= this._threshold();
+	}
+	_cardStyle() {
+		const colors = this._config.colors;
+		const declarations = [];
+		if (colors?.solar) declarations.push(`--apfc-solar:${colors.solar}`);
+		if (colors?.grid) declarations.push(`--apfc-grid:${colors.grid}`);
+		if (colors?.battery) declarations.push(`--apfc-battery:${colors.battery}`);
+		if (colors?.heat_pump) declarations.push(`--apfc-heat:${colors.heat_pump}`);
+		if (colors?.consumer) declarations.push(`--apfc-consumer:${colors.consumer}`);
+		if (colors?.flow) declarations.push(`--apfc-flow:${colors.flow}`);
+		return declarations.join(";");
+	}
 	render() {
 		if (!this.hass) return A;
 		const layout = this._layout();
 		const pvTotal = this._totalPvW();
 		const dailyItems = this._dailyItems();
+		const diagnostics = this._diagnosticMessages();
+		const dailyLayout = this._config.daily_layout ?? "auto";
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
-      <ha-card class=${`text-${this._config.text_size ?? "large"}`}>
+      <ha-card
+        class=${`text-${this._config.text_size ?? "large"} ${this._isPvNight() ? "pv-night" : ""}`}
+        style=${this._cardStyle()}
+      >
         <div class="header">
           <div>
             <div class="title">${this._config.title ?? "Energiefluss"}</div>
@@ -2217,7 +2641,7 @@ var AdvancedPowerFlowCard = class extends i {
         </div>
 
         ${dailyItems.length ? b`
-            <div class="daily-summary">
+            <div class=${`daily-summary daily-${dailyLayout}`}>
               ${dailyItems.map((item) => b`
                 <button
                   class=${`daily-item ${item.expandable ? "expandable" : ""}`}
@@ -2228,6 +2652,8 @@ var AdvancedPowerFlowCard = class extends i {
 				if (next) {
 					this._heatExpanded = false;
 					this._expandedBattery = void 0;
+					this._expandedPvSystem = void 0;
+					this._diagnosticsExpanded = false;
 				}
 				return;
 			}
@@ -2304,9 +2730,19 @@ var AdvancedPowerFlowCard = class extends i {
         <div class="legend">
           <span><i class="dot active"></i> aktiver Energiefluss</span>
           <span><i class="dot idle"></i> kein relevanter Fluss</span>
+          ${diagnostics.length ? b`<button class="diagnostic-summary-button" @click=${() => {
+			const next = !this._diagnosticsExpanded;
+			this._diagnosticsExpanded = next;
+			if (next) {
+				this._heatExpanded = false;
+				this._expandedBattery = void 0;
+				this._pvDailyExpanded = false;
+				this._expandedPvSystem = void 0;
+			}
+		}}>⚠ ${diagnostics.length} Hinweis${diagnostics.length === 1 ? "" : "e"}</button>` : A}
         </div>
 
-        ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : this._expandedBattery !== void 0 && this._config.batteries?.[this._expandedBattery] ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery) : this._pvDailyExpanded ? this._pvDailyDetails() : A}
+        ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : this._expandedBattery !== void 0 && this._config.batteries?.[this._expandedBattery] ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery) : this._expandedPvSystem !== void 0 && this._config.solar?.[this._expandedPvSystem] ? this._pvSystemDetails(this._config.solar[this._expandedPvSystem], this._expandedPvSystem) : this._pvDailyExpanded ? this._pvDailyDetails() : this._diagnosticsExpanded && diagnostics.length ? this._diagnosticsDetails(diagnostics) : A}
       </ha-card>
     `;
 	}
@@ -2820,6 +3256,117 @@ var AdvancedPowerFlowCard = class extends i {
       margin-top: 12px;
     }
 
+    .pv-node-share-track {
+      fill: color-mix(in srgb, var(--secondary-text-color) 15%, transparent);
+    }
+
+    .pv-node-share-fill {
+      fill: var(--apfc-solar);
+      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-solar) 35%, transparent));
+    }
+
+    .pv-night .cluster-bg { opacity: .42; }
+    .pv-night .node.pv:not(.warning) { opacity: .58; }
+    .pv-night .node.pv-parent:not(.warning) { opacity: .68; }
+
+    .daily-summary.daily-compact {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .daily-summary.daily-compact .daily-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex: 1 1 145px;
+      min-height: 38px;
+      padding: 6px 9px;
+    }
+
+    .daily-summary.daily-compact .daily-item strong { font-size: 13px; }
+    .daily-summary.daily-compact .daily-item-label { gap: 4px; }
+
+    .diagnostic-summary-button {
+      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 42%, var(--divider-color));
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+      color: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .detail-warning, .detail-ok {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .detail-warning {
+      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+    }
+
+    .detail-ok {
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 30%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-battery) 6%, transparent);
+    }
+
+    .detail-warning span, .detail-ok span { color: var(--secondary-text-color); }
+    .pv-system-details { border-color: color-mix(in srgb, var(--apfc-solar) 38%, var(--divider-color)); }
+    .details-section-title { margin: 16px 0 8px; font-weight: 700; color: var(--primary-text-color); }
+    .mppt-detail-list { display: grid; gap: 9px; }
+    .mppt-detail-row {
+      padding: 10px 12px;
+      border: 1px solid var(--divider-color);
+      border-radius: 11px;
+      background: var(--card-background-color);
+    }
+    .mppt-detail-row.warning { border-color: color-mix(in srgb, var(--error-color, #db4437) 50%, var(--divider-color)); }
+    .mppt-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .mppt-detail-head > div { display: grid; gap: 2px; }
+    .mppt-detail-head strong { font-size: 14px; }
+    .mppt-detail-head small { color: var(--secondary-text-color); font-size: 11px; }
+    .mppt-detail-head button:disabled { opacity: .45; cursor: default; }
+    .mppt-detail-values {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+      gap: 6px 10px;
+      margin: 9px 0 7px;
+    }
+    .mppt-detail-values span { display: grid; gap: 1px; color: var(--secondary-text-color); font-size: 10.5px; }
+    .mppt-detail-values b { color: var(--primary-text-color); font-size: 13px; }
+    .pv-daily-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+    .pv-daily-meta span {
+      border-radius: 999px;
+      padding: 2px 6px;
+      background: color-mix(in srgb, var(--apfc-solar) 9%, transparent);
+      color: var(--secondary-text-color);
+      font-size: 10px;
+    }
+
+    .diagnostic-list { display: grid; gap: 8px; }
+    .diagnostic-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 30%, var(--divider-color));
+      border-radius: 10px;
+      background: var(--card-background-color);
+    }
+    .diagnostic-row > div { display: grid; gap: 2px; }
+    .diagnostic-row strong { font-size: 13px; }
+    .diagnostic-row span { font-size: 11px; color: var(--secondary-text-color); }
+
     @media (max-width: 700px) {
       ha-card { padding: 12px; }
       .version { font-size: 11.5px; }
@@ -2830,6 +3377,23 @@ var AdvancedPowerFlowCard = class extends i {
         margin-bottom: 8px;
       }
       .daily-item { padding: 7px 8px; }
+      .daily-summary.daily-auto {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .daily-summary.daily-auto .daily-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        flex: 1 1 135px;
+        min-height: 36px;
+        padding: 6px 8px;
+      }
+      .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
+      .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
+      .diagnostic-row { align-items: flex-start; }
     }
 
     @media (prefers-reduced-motion: reduce) {

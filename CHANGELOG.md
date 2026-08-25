@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6
+
+- Added automatic daily Autarky and Eigenverbrauch metrics when the required daily energy sensors are configured.
+- PV system total nodes are now clickable and open a dedicated detail panel with live power, daily energy, peak power, installed kWp, specific yield and MPPT breakdown.
+- Added optional `installed_kwp` to PV systems and MPPTs for normalized W/kWp diagnostics.
+- Added optional `daily_peak_power` to PV systems.
+- Added a live PV share bar to every PV-system total node.
+- Added configurable diagnostics for PV voltage-without-power, battery cell-voltage delta, battery temperature and optional relative MPPT underperformance.
+- Added a central diagnostics panel and warning highlighting on affected PV/battery nodes.
+- Added sensor-unavailable checks for key power, PV and battery entities.
+- Heat-pump COP is calculated automatically from thermal/electrical power when no COP sensor is configured.
+- Battery details now optionally calculate daily discharge/charge ratio and equivalent cycles when capacity and daily charge/discharge energy are available.
+- Added optional night mode that visually de-emphasizes inactive PV sections.
+- Added `cards`, `compact` and `auto` layouts for the daily summary.
+- Added optional category/flow color overrides.
+- PV daily breakdown now shows installed kWp, specific daily yield and daily peak power where configured.
+
 ## 0.2.5
 
 - Reworked PV-system hierarchy: MPPT nodes are visually quieter while the system total is shown as a wider, stronger summary node with a `Gesamt` badge.
@@ -13,53 +30,21 @@
 ## 0.2.4
 
 - Reworked the center node: it now shows total current supply instead of repeating PV power.
-- Added live energy-balance diagnostics. With a measured house-power entity the center reports residual balance and highlights deviations above the configurable warning threshold.
-- House nodes calculated from PV/grid/battery power now show a clear `Berechnet` badge.
-- Grid flow now uses a compact `Bezug` / `Einspeisung` / `Ruhe` badge.
-- Battery subtitles now state `Lädt`, `Entlädt` or `Ruhe` alongside SOC.
-- Added 20% and 80% reference marks to battery SOC bars.
-- Added `small`, `normal` and `large` typography modes; `large` is the new default for improved phone readability.
-- Added optional daily summary entities for PV energy, grid import, grid export and house energy.
-- Hovering a node on desktop now emphasizes its connected power-flow path and fades unrelated paths.
-- Idle/zero-power nodes are visually quieter.
-- Removed the layout hint below the diagram.
+- Added live energy-balance diagnostics.
+- Added optional daily summary values and typography size modes.
 
 ## 0.2.3
 
-- Added a graphical SOC fill bar to every battery node.
-- Added a compact operating-mode/status badge to the heat-pump node.
-- Added visual active, idle and unavailable node states.
-- Idle nodes are intentionally quieter while active nodes receive a slightly stronger outline.
-- Unavailable nodes use a subdued dashed outline so missing data is immediately recognizable.
-- Heat-pump summary now prioritizes flow temperature and COP because the operating mode is shown as a badge.
+- Added battery SOC fill bars, heat-pump status badges and active/idle/unavailable visual states.
 
 ## 0.2.2
 
-- Increased diagram typography slightly for better phone readability.
-- Added subtle semantic accents for PV, grid, battery and heat-pump nodes.
-- Added softer node shadows and a subtle active-flow glow.
-- Refined PV cluster styling and visual hierarchy.
-- Hid the layout hint on small screens to reduce visual clutter.
-- MPPT secondary information now omits missing voltage/current values instead of showing placeholder dashes.
+- Improved mobile readability and semantic colors.
 
 ## 0.2.1
 
-- Removed internal horizontal scrolling; the complete diagram now fits the card width.
-- PV systems wrap into multiple rows instead of making the diagram wider.
-- MPPT nodes wrap within their PV system.
-- Bottom consumers/batteries wrap into rows.
-- Rebalanced node sizes and typography between v0.1 and v0.2.
-- House consumption is calculated automatically when no house power entity is configured.
-- Automatic house balance respects grid and battery sign settings and avoids double-counting child consumers.
+- Removed internal horizontal scrolling and added automatic house-power calculation.
 
 ## 0.2.0
 
-- Dynamic number of PV systems.
-- Arbitrary number of sub-PV/MPPT inputs per PV system.
-- Dynamic number of batteries.
-- Optional generic consumers.
-- Extended heat-pump data with expandable details.
-- Larger nodes, typography and flow lines.
-- Responsive diagram that preserves readability with horizontal scrolling if necessary.
-- Graphical editor for adding/removing PV systems, MPPTs, batteries and consumers.
-- Automatic migration of the v0.1 fixed PV1/PV2/PV3 and battery1/battery2 configuration.
+- Dynamic PV systems, MPPTs, batteries and consumers.

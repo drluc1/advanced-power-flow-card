@@ -26,12 +26,7 @@ function legacySolarToArray(solar: unknown): PvSystemConfig[] {
 
   if (!entries.length) return [];
 
-  return [
-    {
-      name: "PV-Anlage",
-      children: entries
-    }
-  ];
+  return [{ name: "PV-Anlage", children: entries }];
 }
 
 export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
@@ -48,13 +43,13 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     batteries = raw.batteries as BatteryConfig[];
   } else {
     batteries = [];
-    if (raw.battery1 && typeof raw.battery1 === "object") {
-      batteries.push(raw.battery1 as BatteryConfig);
-    }
-    if (raw.battery2 && typeof raw.battery2 === "object") {
-      batteries.push(raw.battery2 as BatteryConfig);
-    }
+    if (raw.battery1 && typeof raw.battery1 === "object") batteries.push(raw.battery1 as BatteryConfig);
+    if (raw.battery2 && typeof raw.battery2 === "object") batteries.push(raw.battery2 as BatteryConfig);
   }
+
+  const diagnosticsRaw = raw.diagnostics && typeof raw.diagnostics === "object"
+    ? raw.diagnostics as Record<string, unknown>
+    : {};
 
   return {
     type: typeof raw.type === "string" ? raw.type : "custom:advanced-power-flow-card",
@@ -66,6 +61,34 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     heat_pump: raw.heat_pump && typeof raw.heat_pump === "object" ? raw.heat_pump : undefined,
     consumers: Array.isArray(raw.consumers) ? raw.consumers : [],
     daily: raw.daily && typeof raw.daily === "object" ? raw.daily : undefined,
+    diagnostics: {
+      enabled: typeof diagnosticsRaw.enabled === "boolean" ? diagnosticsRaw.enabled : true,
+      pv_voltage_without_power_threshold:
+        typeof diagnosticsRaw.pv_voltage_without_power_threshold === "number"
+          ? diagnosticsRaw.pv_voltage_without_power_threshold
+          : 80,
+      battery_cell_delta_warning:
+        typeof diagnosticsRaw.battery_cell_delta_warning === "number"
+          ? diagnosticsRaw.battery_cell_delta_warning
+          : 0.05,
+      battery_temperature_low:
+        typeof diagnosticsRaw.battery_temperature_low === "number"
+          ? diagnosticsRaw.battery_temperature_low
+          : 5,
+      battery_temperature_high:
+        typeof diagnosticsRaw.battery_temperature_high === "number"
+          ? diagnosticsRaw.battery_temperature_high
+          : 45,
+      mppt_relative_warning_enabled:
+        typeof diagnosticsRaw.mppt_relative_warning_enabled === "boolean"
+          ? diagnosticsRaw.mppt_relative_warning_enabled
+          : false,
+      mppt_relative_warning_ratio:
+        typeof diagnosticsRaw.mppt_relative_warning_ratio === "number"
+          ? diagnosticsRaw.mppt_relative_warning_ratio
+          : 0.35
+    },
+    colors: raw.colors && typeof raw.colors === "object" ? raw.colors : undefined,
     power_threshold:
       typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold)
         ? raw.power_threshold
@@ -77,7 +100,12 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     text_size:
       raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal"
         ? raw.text_size
-        : "large"
+        : "large",
+    daily_layout:
+      raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
+        ? raw.daily_layout
+        : "cards",
+    night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
   } as AdvancedPowerFlowCardConfig;
 }
 
@@ -89,66 +117,27 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
       {
         name: "GoodWe",
         power: "sensor.goodwe_pv_power",
+        installed_kwp: 6,
         children: [
-          {
-            name: "MPPT 1",
-            power: "sensor.goodwe_pv1_power",
-            voltage: "sensor.goodwe_pv1_voltage",
-            current: "sensor.goodwe_pv1_current"
-          },
-          {
-            name: "MPPT 2",
-            power: "sensor.goodwe_pv2_power",
-            voltage: "sensor.goodwe_pv2_voltage",
-            current: "sensor.goodwe_pv2_current"
-          },
-          {
-            name: "MPPT 3",
-            power: "sensor.goodwe_pv3_power",
-            voltage: "sensor.goodwe_pv3_voltage",
-            current: "sensor.goodwe_pv3_current"
-          }
+          { name: "MPPT 1", power: "sensor.goodwe_pv1_power", voltage: "sensor.goodwe_pv1_voltage", current: "sensor.goodwe_pv1_current", installed_kwp: 2 },
+          { name: "MPPT 2", power: "sensor.goodwe_pv2_power", voltage: "sensor.goodwe_pv2_voltage", current: "sensor.goodwe_pv2_current", installed_kwp: 2 },
+          { name: "MPPT 3", power: "sensor.goodwe_pv3_power", voltage: "sensor.goodwe_pv3_voltage", current: "sensor.goodwe_pv3_current", installed_kwp: 2 }
         ]
       },
       {
         name: "Victron",
         children: [
-          {
-            name: "MPPT 1",
-            power: "sensor.victron_mppt_1_power",
-            voltage: "sensor.victron_mppt_1_voltage",
-            current: "sensor.victron_mppt_1_current"
-          },
-          {
-            name: "MPPT 2",
-            power: "sensor.victron_mppt_2_power",
-            voltage: "sensor.victron_mppt_2_voltage",
-            current: "sensor.victron_mppt_2_current"
-          }
+          { name: "MPPT 1", power: "sensor.victron_mppt_1_power", voltage: "sensor.victron_mppt_1_voltage", current: "sensor.victron_mppt_1_current" },
+          { name: "MPPT 2", power: "sensor.victron_mppt_2_power", voltage: "sensor.victron_mppt_2_voltage", current: "sensor.victron_mppt_2_current" }
         ]
       }
     ],
     batteries: [
-      {
-        name: "Batterie 1",
-        power: "sensor.battery_1_power",
-        soc: "sensor.battery_1_soc",
-        positive_is_charging: true
-      },
-      {
-        name: "Batterie 2",
-        power: "sensor.battery_2_power",
-        soc: "sensor.battery_2_soc",
-        positive_is_charging: true
-      }
+      { name: "Batterie 1", power: "sensor.battery_1_power", soc: "sensor.battery_1_soc", positive_is_charging: true },
+      { name: "Batterie 2", power: "sensor.battery_2_power", soc: "sensor.battery_2_soc", positive_is_charging: true }
     ],
-    grid: {
-      power: "sensor.grid_power",
-      positive_is_import: true
-    },
-    house: {
-      name: "Haus"
-    },
+    grid: { power: "sensor.grid_power", positive_is_import: true },
+    house: { name: "Haus" },
     heat_pump: {
       name: "Wärmepumpe",
       power: "sensor.heatpump_power",
@@ -166,8 +155,19 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     },
     consumers: [],
     daily: {},
+    diagnostics: {
+      enabled: true,
+      pv_voltage_without_power_threshold: 80,
+      battery_cell_delta_warning: 0.05,
+      battery_temperature_low: 5,
+      battery_temperature_high: 45,
+      mppt_relative_warning_enabled: false,
+      mppt_relative_warning_ratio: 0.35
+    },
     power_threshold: 5,
     balance_warning_threshold: 50,
-    text_size: "large"
+    text_size: "large",
+    daily_layout: "cards",
+    night_mode: true
   };
 }

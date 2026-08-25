@@ -1,54 +1,62 @@
 type: custom:advanced-power-flow-card
-title: Energiefluss
+title: Energieverbrauch
 power_threshold: 5
 balance_warning_threshold: 50
 text_size: large
+daily_layout: cards
+night_mode: true
 
 solar:
-  - name: GoodWe
+  - name: Hausdach
     power: sensor.goodwe_pv_power
     daily_energy: sensor.goodwe_pv_energy_today
+    daily_peak_power: sensor.goodwe_pv_peak_today
+    installed_kwp: 5.94
     children:
-      - name: MPPT 1
+      - name: MPPT 1 Gaube
         power: sensor.goodwe_pv1_power
         voltage: sensor.goodwe_pv1_voltage
         current: sensor.goodwe_pv1_current
-      - name: MPPT 2
+        installed_kwp: 1.98
+      - name: MPPT 2 Garten
         power: sensor.goodwe_pv2_power
         voltage: sensor.goodwe_pv2_voltage
         current: sensor.goodwe_pv2_current
-      - name: MPPT 3
+        installed_kwp: 1.98
+      - name: MPPT 3 Straße
         power: sensor.goodwe_pv3_power
         voltage: sensor.goodwe_pv3_voltage
         current: sensor.goodwe_pv3_current
+        installed_kwp: 1.98
 
-  - name: Victron
+  - name: Garage
     daily_energy: sensor.victron_pv_energy_today
+    installed_kwp: 1.2
     children:
-      - name: MPPT Garage
-        power: sensor.victron_mppt_garage_power
-        voltage: sensor.victron_mppt_garage_voltage
-        current: sensor.victron_mppt_garage_current
-      - name: MPPT Garten
-        power: sensor.victron_mppt_garten_power
-        voltage: sensor.victron_mppt_garten_voltage
-        current: sensor.victron_mppt_garten_current
+      - name: Victron MPPT 1
+        power: sensor.victron_mppt_1_power
+        voltage: sensor.victron_mppt_1_voltage
+        current: sensor.victron_mppt_1_current
+      - name: Victron MPPT 2
+        power: sensor.victron_mppt_2_power
+        voltage: sensor.victron_mppt_2_voltage
+        current: sensor.victron_mppt_2_current
 
 batteries:
-  - name: Batterie 1
+  - name: Akku Garage
     power: sensor.battery_1_power
     soc: sensor.battery_1_soc
     positive_is_charging: true
+    capacity_kwh: 5.0
     voltage: sensor.battery_1_voltage
     current: sensor.battery_1_current
     temperature: sensor.battery_1_temperature
     cell_min_voltage: sensor.battery_1_cell_min_voltage
     cell_max_voltage: sensor.battery_1_cell_max_voltage
-    cell_min_temperature: sensor.battery_1_cell_min_temperature
-    cell_max_temperature: sensor.battery_1_cell_max_temperature
-    state_of_health: sensor.battery_1_soh
-    cycle_count: sensor.battery_1_cycles
-  - name: Batterie 2
+    daily_charge_energy: sensor.battery_1_charge_today
+    daily_discharge_energy: sensor.battery_1_discharge_today
+
+  - name: Akku Pylontech
     power: sensor.battery_2_power
     soc: sensor.battery_2_soc
     positive_is_charging: true
@@ -59,7 +67,6 @@ grid:
 
 house:
   name: Haus
-  # power leer lassen -> automatische Berechnung aus PV, Netz und Batterien
 
 heat_pump:
   name: Wärmepumpe
@@ -68,26 +75,26 @@ heat_pump:
   flow_temperature: sensor.heatpump_flow_temperature
   return_temperature: sensor.heatpump_return_temperature
   outdoor_temperature: sensor.heatpump_outdoor_temperature
-  hot_water_temperature: sensor.heatpump_hot_water_temperature
-  room_temperature: sensor.heatpump_room_temperature
-  target_temperature: sensor.heatpump_target_temperature
-  mode: sensor.heatpump_mode
-  compressor_status: binary_sensor.heatpump_compressor
-  compressor_frequency: sensor.heatpump_compressor_frequency
   thermal_power: sensor.heatpump_thermal_power
-  cop: sensor.heatpump_cop
+  mode: sensor.heatpump_mode
   daily_energy: sensor.heatpump_daily_energy
-  details_expanded_by_default: false
 
 consumers:
-  - name: Server
-    power: sensor.server_power
+  - name: Wallbox
+    power: sensor.wallbox_power
     part_of_house: true
 
-
-# Optional: Tagesenergie-Werte im Kopf der Card
 daily:
   pv_energy: sensor.pv_energy_today
   grid_import_energy: sensor.grid_import_today
   grid_export_energy: sensor.grid_export_today
   house_energy: sensor.house_energy_today
+
+diagnostics:
+  enabled: true
+  pv_voltage_without_power_threshold: 80
+  battery_cell_delta_warning: 0.05
+  battery_temperature_low: 5
+  battery_temperature_high: 45
+  mppt_relative_warning_enabled: false
+  mppt_relative_warning_ratio: 0.35
