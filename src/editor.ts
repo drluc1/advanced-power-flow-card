@@ -195,8 +195,16 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
           ${this._selectInput("Schriftgröße", this._config.text_size, [
             { value: "small", label: "Klein" },
             { value: "normal", label: "Normal" },
-            { value: "large", label: "Groß" }
-          ], (value) => this._with((config) => { config.text_size = value as "small" | "normal" | "large"; }))}
+            { value: "large", label: "Groß" },
+            { value: "xlarge", label: "Sehr groß" }
+          ], (value) => this._with((config) => { config.text_size = value as "small" | "normal" | "large" | "xlarge"; }))}
+          ${this._numberInput("Mobile Skalierung", this._config.mobile_scale, 1.06, (value) => this._with((config) => { config.mobile_scale = Math.min(1.3, Math.max(0.9, value)); }), { min: 0.9, max: 1.3, step: 0.01 })}
+          ${this._selectInput("Layout-Dichte", this._config.layout_density, [
+            { value: "auto", label: "Automatisch" },
+            { value: "compact", label: "Kompakt" },
+            { value: "comfortable", label: "Großzügig" }
+          ], (value) => this._with((config) => { config.layout_density = value as "auto" | "compact" | "comfortable"; }))}
+          <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },
             { value: "cards", label: "Karten" },
@@ -227,6 +235,8 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                   ${this._entityPicker("Tagesproduktion", system.daily_energy, (value) => this._updateSolar(solarIndex, { daily_energy: value }))}
                   ${this._entityPicker("Peak-Leistung heute", system.daily_peak_power, (value) => this._updateSolar(solarIndex, { daily_peak_power: value }))}
                   ${this._optionalNumberInput("Installierte Leistung [kWp]", system.installed_kwp, "z. B. 4.95", (value) => this._updateSolar(solarIndex, { installed_kwp: value }), { step: 0.01 })}
+                  ${this._entityPicker("Wechselrichter-Temperatur (optional)", system.inverter_temperature, (value) => this._updateSolar(solarIndex, { inverter_temperature: value }))}
+                  ${this._entityPicker("PV-Systemstatus (optional)", system.status, (value) => this._updateSolar(solarIndex, { status: value }))}
                 </div>
 
                 <div class="subhead">
@@ -254,6 +264,7 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                         ${this._entityPicker("Tagesproduktion", input.daily_energy, (value) => this._updateMppt(solarIndex, inputIndex, { daily_energy: value }))}
                         ${this._entityPicker("Peak-Leistung heute", input.daily_peak_power, (value) => this._updateMppt(solarIndex, inputIndex, { daily_peak_power: value }))}
                         ${this._optionalNumberInput("Installierte Leistung [kWp]", input.installed_kwp, "optional", (value) => this._updateMppt(solarIndex, inputIndex, { installed_kwp: value }), { step: 0.01 })}
+                        ${this._entityPicker("MPPT-Status (optional)", input.status, (value) => this._updateMppt(solarIndex, inputIndex, { status: value }))}
                       </div>
                     </div>
                   `)}
@@ -305,6 +316,9 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                     ${this._entityPicker("Zelltemperatur Minimum", battery.cell_min_temperature, (value) => this._updateBattery(index, { cell_min_temperature: value }))}
                     ${this._entityPicker("Zelltemperatur Maximum", battery.cell_max_temperature, (value) => this._updateBattery(index, { cell_max_temperature: value }))}
                     ${this._entityPicker("State of Health (SOH)", battery.state_of_health, (value) => this._updateBattery(index, { state_of_health: value }))}
+                    ${this._entityPicker("Batteriestatus (optional)", battery.status, (value) => this._updateBattery(index, { status: value }))}
+                    ${this._entityPicker("SOC Minimum heute", battery.daily_min_soc, (value) => this._updateBattery(index, { daily_min_soc: value }))}
+                    ${this._entityPicker("SOC Maximum heute", battery.daily_max_soc, (value) => this._updateBattery(index, { daily_max_soc: value }))}
                     ${this._entityPicker("Zyklen", battery.cycle_count, (value) => this._updateBattery(index, { cycle_count: value }))}
                     ${this._entityPicker("Restenergie", battery.remaining_energy, (value) => this._updateBattery(index, { remaining_energy: value }))}
                     ${this._entityPicker("Ladeenergie heute", battery.daily_charge_energy, (value) => this._updateBattery(index, { daily_charge_energy: value }))}
@@ -339,6 +353,20 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
         </section>
 
         <section>
+          <div class="section-title"><h3>Strompreis & Kosten (optional)</h3></div>
+          <div class="form-grid full">
+            ${this._entityPicker("Aktueller Bezugspreis", this._config.tariffs?.import_price, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, import_price: value }; }))}
+            ${this._entityPicker("Aktuelle Einspeisevergütung", this._config.tariffs?.export_price, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, export_price: value }; }))}
+            ${this._entityPicker("Netzkosten heute", this._config.tariffs?.import_cost_today, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, import_cost_today: value }; }))}
+            ${this._entityPicker("Einspeiseerlös heute", this._config.tariffs?.export_revenue_today, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, export_revenue_today: value }; }))}
+            ${this._optionalNumberInput("Fester Bezugspreis [€/kWh]", this._config.tariffs?.fixed_import_price, "optional", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, fixed_import_price: value }; }), { min: 0, step: 0.001 })}
+            ${this._optionalNumberInput("Feste Einspeisevergütung [€/kWh]", this._config.tariffs?.fixed_export_price, "optional", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, fixed_export_price: value }; }), { min: 0, step: 0.001 })}
+            ${this._textInput("Währung", this._config.tariffs?.currency, "€", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, currency: value }; }))}
+            <div class="help">Tageskosten werden bevorzugt aus eigenen Kosten-/Erlös-Entities gelesen. Mit festen Preisen kann die Card alternativ aus den Tages-kWh schätzen. Ein dynamischer aktueller Preis wird bewusst nicht rückwirkend auf den ganzen Tag angewendet.</div>
+          </div>
+        </section>
+
+        <section>
           <div class="section-title"><h3>Diagnose & Warnungen</h3></div>
           <div class="form-grid full">
             ${this._checkbox("Diagnose aktivieren", this._config.diagnostics?.enabled, true, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, enabled: value }; }))}
@@ -346,6 +374,8 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             ${this._numberInput("Zellspannungs-Delta Warnung [V]", this._config.diagnostics?.battery_cell_delta_warning, 0.05, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, battery_cell_delta_warning: value }; }), { step: 0.005 })}
             ${this._numberInput("Batterietemperatur Minimum [°C]", this._config.diagnostics?.battery_temperature_low, 5, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, battery_temperature_low: value }; }), { min: -40, step: 1 })}
             ${this._numberInput("Batterietemperatur Maximum [°C]", this._config.diagnostics?.battery_temperature_high, 45, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, battery_temperature_high: value }; }))}
+            ${this._numberInput("PV/Wechselrichter Temperatur Maximum [°C]", this._config.diagnostics?.pv_temperature_high, 75, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, pv_temperature_high: value }; }))}
+            ${this._numberInput("Sensor veraltet nach [min] (0 = aus)", this._config.diagnostics?.stale_sensor_minutes, 0, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, stale_sensor_minutes: value }; }), { min: 0, step: 1 })}
             ${this._checkbox("MPPT-Abweichungsdiagnose aktivieren", this._config.diagnostics?.mppt_relative_warning_enabled, false, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_relative_warning_enabled: value }; }))}
             ${this._numberInput("MPPT-Warnverhältnis", this._config.diagnostics?.mppt_relative_warning_ratio, 0.35, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_relative_warning_ratio: value }; }), { step: 0.05 })}
             ${this._checkbox("MPPT-Tagesertragsdiagnose aktivieren", this._config.diagnostics?.mppt_daily_relative_warning_enabled, false, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_daily_relative_warning_enabled: value }; }))}

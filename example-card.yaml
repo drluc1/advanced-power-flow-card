@@ -2,7 +2,9 @@ type: custom:advanced-power-flow-card
 title: Energieverbrauch
 power_threshold: 5
 balance_warning_threshold: 50
-text_size: large
+text_size: xlarge
+mobile_scale: 1.08
+layout_density: auto
 daily_layout: cards
 night_mode: true
 
@@ -12,6 +14,8 @@ solar:
     daily_energy: sensor.goodwe_pv_energy_today
     daily_peak_power: sensor.goodwe_pv_peak_today
     installed_kwp: 5.94
+    inverter_temperature: sensor.goodwe_inverter_temperature
+    status: sensor.goodwe_status
     children:
       - name: MPPT 1 Gaube
         power: sensor.goodwe_pv1_power
@@ -65,6 +69,9 @@ batteries:
     temperature: sensor.battery_1_temperature
     cell_min_voltage: sensor.battery_1_cell_min_voltage
     cell_max_voltage: sensor.battery_1_cell_max_voltage
+    status: sensor.battery_1_bms_status
+    daily_min_soc: sensor.battery_1_min_soc_today
+    daily_max_soc: sensor.battery_1_max_soc_today
     daily_charge_energy: sensor.battery_1_charge_today
     daily_discharge_energy: sensor.battery_1_discharge_today
 
@@ -106,6 +113,13 @@ daily:
   grid_export_energy: sensor.grid_export_today
   house_energy: sensor.house_energy_today
 
+tariffs:
+  import_price: sensor.current_electricity_price
+  export_price: sensor.current_feed_in_price
+  fixed_import_price: 0.31
+  fixed_export_price: 0.082
+  currency: "€"
+
 diagnostics:
   enabled: true
   pv_voltage_without_power_threshold: 80
@@ -116,3 +130,5 @@ diagnostics:
   mppt_relative_warning_ratio: 0.35
   mppt_daily_relative_warning_enabled: false
   mppt_daily_relative_warning_ratio: 0.35
+  pv_temperature_high: 75
+  stale_sensor_minutes: 0

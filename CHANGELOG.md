@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.9
+
+- Added `xlarge` text mode with slightly larger diagram nodes.
+- Added independent `mobile_scale` (0.90-1.30) for mobile typography.
+- Added `layout_density`: `auto`, `compact` and `comfortable`; auto uses more of the available mobile card width.
+- Added optional live electricity-price and feed-in-price display.
+- Added optional daily grid-cost and feed-in-revenue entities.
+- Added fixed import/export tariffs for estimated daily cost/revenue when dedicated cost sensors do not exist.
+- Added battery BMS status plus daily min/max SOC detail entities and a compact derived battery diagnostic status.
+- Added PV-system inverter temperature and optional PV-system/MPPT status entities.
+- Added configurable high inverter-temperature diagnostics.
+- Added optional stale-sensor diagnostics using Home Assistant entity update timestamps.
+
 ## 0.2.8
 
 - Added estimated remaining battery charging time and discharge runtime in hours.

@@ -2,9 +2,16 @@
 
 Flexible Home Assistant Lovelace power-flow card with dynamic PV systems, MPPTs, batteries, grid, house load, heat pump and additional consumers.
 
-## v0.2.8 highlights
+## v0.2.9 highlights
 
 - Unlimited PV systems and MPPT/sub-PV inputs.
+- New `xlarge` typography mode plus independent mobile scaling from 0.90 to 1.30.
+- New adaptive layout-density modes: `auto`, `compact` and `comfortable`.
+- Optional electricity-price, daily grid-cost and feed-in-revenue cards.
+- Fixed tariffs can estimate daily import cost / export revenue from daily kWh.
+- Extended battery health information with BMS status and daily min/max SOC.
+- Extended PV health information with optional inverter temperature and system/MPPT status.
+- Optional stale-sensor diagnostics based on Home Assistant `last_updated`.
 - Battery charge-time and discharge-runtime estimates in hours when enough battery data is available.
 - Configurable target SOC, reserve SOC and minimum power threshold for stable estimates.
 - Optional smoothed/average battery-power entity for less jumpy forecasts.
@@ -40,6 +47,8 @@ solar:
     daily_energy: sensor.goodwe_pv_energy_today
     daily_peak_power: sensor.goodwe_pv_peak_today
     installed_kwp: 5.94
+    inverter_temperature: sensor.goodwe_inverter_temperature
+    status: sensor.goodwe_status
     children:
       - name: MPPT 1 Gaube
         power: sensor.goodwe_pv1_power
@@ -48,6 +57,7 @@ solar:
         daily_energy: sensor.goodwe_pv1_energy_today
         daily_peak_power: sensor.goodwe_pv1_peak_today
         installed_kwp: 1.98
+        status: sensor.goodwe_mppt1_status
       - name: MPPT 2 Garten
         power: sensor.goodwe_pv2_power
         voltage: sensor.goodwe_pv2_voltage
@@ -104,6 +114,8 @@ diagnostics:
   mppt_relative_warning_ratio: 0.35
   mppt_daily_relative_warning_enabled: false
   mppt_daily_relative_warning_ratio: 0.35
+  pv_temperature_high: 75
+  stale_sensor_minutes: 0       # 0 = disabled
 ```
 
 The card can flag:
@@ -114,6 +126,9 @@ The card can flag:
 - Battery temperatures outside configured limits.
 - Power-balance residuals when a measured house-power entity is configured.
 - Optional relative MPPT underperformance.
+- Excessive inverter temperature when configured.
+- Optional stale-sensor warnings after a configurable number of minutes.
+- Fault/error/alarm states from optional PV/MPPT/BMS status entities.
 
 Relative MPPT diagnostics are **off by default** because different orientations/shading can make comparisons misleading. Live comparison uses W/kWp when possible. Daily comparison requires `daily_energy` and `installed_kwp` on all MPPTs and compares kWh/kWp.
 
@@ -140,6 +155,9 @@ batteries:
     cell_min_temperature: sensor.battery_cell_min_temperature
     cell_max_temperature: sensor.battery_cell_max_temperature
     state_of_health: sensor.battery_soh
+    status: sensor.battery_bms_status
+    daily_min_soc: sensor.battery_min_soc_today
+    daily_max_soc: sensor.battery_max_soc_today
     cycle_count: sensor.battery_cycles
     remaining_energy: sensor.battery_remaining_energy
     daily_charge_energy: sensor.battery_charge_today
@@ -207,14 +225,40 @@ Haus = PV + Netzbezug - Einspeisung + Batterieentladung - Batterieladung
 
 Direct consumers with `part_of_house: false` are subtracted from that calculated house value.
 
+## Electricity price and costs
+
+```yaml
+tariffs:
+  import_price: sensor.current_electricity_price
+  export_price: sensor.current_feed_in_price
+  import_cost_today: sensor.grid_cost_today
+  export_revenue_today: sensor.feed_in_revenue_today
+  currency: "€"
+```
+
+If Home Assistant does not provide daily cost/revenue entities, fixed tariffs can be used instead:
+
+```yaml
+tariffs:
+  fixed_import_price: 0.31
+  fixed_export_price: 0.082
+  currency: "€"
+```
+
+The fixed-price calculation uses the configured daily grid-import/export energy. A live dynamic price entity is shown as information only and is deliberately not multiplied by the entire day's energy.
+
 ## Display options
 
 ```yaml
-text_size: large
+text_size: xlarge           # small | normal | large | xlarge
+mobile_scale: 1.08          # 0.90 ... 1.30; only applied on small displays
+layout_density: auto        # auto | compact | comfortable
 power_threshold: 5
 balance_warning_threshold: 50
 night_mode: true
 ```
+
+`xlarge` also gives SVG nodes a little more vertical room. `mobile_scale` changes typography on narrow screens without forcing the desktop dashboard to use the same larger text. `layout_density: auto` uses tighter outer spacing on phones while keeping more breathing room on desktop.
 
 Optional color overrides accept normal CSS colors:
 

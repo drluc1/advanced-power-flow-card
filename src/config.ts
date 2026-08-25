@@ -94,8 +94,17 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
       mppt_daily_relative_warning_ratio:
         typeof diagnosticsRaw.mppt_daily_relative_warning_ratio === "number"
           ? diagnosticsRaw.mppt_daily_relative_warning_ratio
-          : 0.35
+          : 0.35,
+      pv_temperature_high:
+        typeof diagnosticsRaw.pv_temperature_high === "number"
+          ? diagnosticsRaw.pv_temperature_high
+          : 75,
+      stale_sensor_minutes:
+        typeof diagnosticsRaw.stale_sensor_minutes === "number"
+          ? diagnosticsRaw.stale_sensor_minutes
+          : 0
     },
+    tariffs: raw.tariffs && typeof raw.tariffs === "object" ? raw.tariffs : undefined,
     colors: raw.colors && typeof raw.colors === "object" ? raw.colors : undefined,
     power_threshold:
       typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold)
@@ -106,9 +115,17 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
         ? raw.balance_warning_threshold
         : 50,
     text_size:
-      raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal"
+      raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" || raw.text_size === "xlarge"
         ? raw.text_size
         : "large",
+    mobile_scale:
+      typeof raw.mobile_scale === "number" && Number.isFinite(raw.mobile_scale)
+        ? Math.min(1.3, Math.max(0.9, raw.mobile_scale))
+        : 1.06,
+    layout_density:
+      raw.layout_density === "compact" || raw.layout_density === "comfortable" || raw.layout_density === "auto"
+        ? raw.layout_density
+        : "auto",
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
         ? raw.daily_layout
@@ -177,6 +194,8 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     power_threshold: 5,
     balance_warning_threshold: 50,
     text_size: "large",
+    mobile_scale: 1.06,
+    layout_density: "auto",
     daily_layout: "cards",
     night_mode: true
   };

@@ -2,6 +2,8 @@ export interface HassEntity {
   entity_id: string;
   state: string;
   attributes: Record<string, unknown>;
+  last_changed?: string;
+  last_updated?: string;
 }
 
 export interface HomeAssistant {
@@ -16,6 +18,7 @@ export interface PvInputConfig {
   daily_energy?: string;
   daily_peak_power?: string;
   installed_kwp?: number;
+  status?: string;
 }
 
 export interface PvSystemConfig {
@@ -24,6 +27,8 @@ export interface PvSystemConfig {
   daily_energy?: string;
   daily_peak_power?: string;
   installed_kwp?: number;
+  inverter_temperature?: string;
+  status?: string;
   children?: PvInputConfig[];
 }
 
@@ -51,6 +56,9 @@ export interface BatteryConfig {
   average_power?: string;
   max_charge_power_kw?: number;
   max_discharge_power_kw?: number;
+  status?: string;
+  daily_min_soc?: string;
+  daily_max_soc?: string;
 }
 
 export interface GridConfig {
@@ -71,6 +79,16 @@ export interface DailyStatsConfig {
   house_energy?: string;
 }
 
+export interface TariffConfig {
+  import_price?: string;
+  export_price?: string;
+  import_cost_today?: string;
+  export_revenue_today?: string;
+  fixed_import_price?: number;
+  fixed_export_price?: number;
+  currency?: string;
+}
+
 export interface DiagnosticsConfig {
   enabled?: boolean;
   pv_voltage_without_power_threshold?: number;
@@ -81,6 +99,8 @@ export interface DiagnosticsConfig {
   mppt_relative_warning_ratio?: number;
   mppt_daily_relative_warning_enabled?: boolean;
   mppt_daily_relative_warning_ratio?: number;
+  pv_temperature_high?: number;
+  stale_sensor_minutes?: number;
 }
 
 export interface CardColorsConfig {
@@ -92,8 +112,9 @@ export interface CardColorsConfig {
   flow?: string;
 }
 
-export type TextSize = "small" | "normal" | "large";
+export type TextSize = "small" | "normal" | "large" | "xlarge";
 export type DailyLayout = "auto" | "cards" | "compact";
+export type LayoutDensity = "auto" | "compact" | "comfortable";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -123,11 +144,14 @@ export interface AdvancedPowerFlowCardConfig {
   heat_pump?: HeatPumpConfig;
   consumers?: ConsumerConfig[];
   daily?: DailyStatsConfig;
+  tariffs?: TariffConfig;
   diagnostics?: DiagnosticsConfig;
   colors?: CardColorsConfig;
   power_threshold?: number;
   balance_warning_threshold?: number;
   text_size?: TextSize;
+  mobile_scale?: number;
+  layout_density?: LayoutDensity;
   daily_layout?: DailyLayout;
   night_mode?: boolean;
 }
