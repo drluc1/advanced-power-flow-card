@@ -808,6 +808,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
       <input
         type="number"
         min=${String(options.min ?? 0)}
+        max=${options.max === void 0 ? "" : String(options.max)}
         step=${String(options.step ?? 1)}
         .value=${String(value ?? fallback)}
         @input=${(event) => {
@@ -823,6 +824,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
       <input
         type="number"
         min=${String(options.min ?? 0)}
+        max=${options.max === void 0 ? "" : String(options.max)}
         step=${String(options.step ?? .01)}
         .value=${value === void 0 ? "" : String(value)}
         placeholder=${placeholder}
@@ -1051,12 +1053,36 @@ var AdvancedPowerFlowCardEditor = class extends i {
                   ${this._entityPicker("Leistung", battery.power, (value) => this._updateBattery(index, { power: value }))}
                   ${this._entityPicker("SOC", battery.soc, (value) => this._updateBattery(index, { soc: value }))}
                   ${this._optionalNumberInput("Nutzbare Kapazität [kWh]", battery.capacity_kwh, "optional", (value) => this._updateBattery(index, { capacity_kwh: value }), { step: .1 })}
+                  ${this._optionalNumberInput("Ziel-SOC [%]", battery.target_soc, "100", (value) => this._updateBattery(index, { target_soc: value }), {
+			min: 0,
+			max: 100,
+			step: 1
+		})}
+                  ${this._optionalNumberInput("Reserve-SOC [%]", battery.reserve_soc, "0", (value) => this._updateBattery(index, { reserve_soc: value }), {
+			min: 0,
+			max: 100,
+			step: 1
+		})}
+                  ${this._optionalNumberInput("Prognose erst ab [W]", battery.estimate_min_power_w, "100", (value) => this._updateBattery(index, { estimate_min_power_w: value }), {
+			min: 0,
+			step: 10
+		})}
                   ${this._checkbox("Positiver Wert bedeutet Laden", battery.positive_is_charging, true, (value) => this._updateBattery(index, { positive_is_charging: value }))}
+                  <div class="help">Für Lade-/Restlaufzeit werden Kapazität + SOC bzw. Restenergie und eine ausreichend hohe Batterieleistung benötigt.</div>
                 </div>
 
                 <details class="optional-details">
                   <summary>Batterie-Detaildaten</summary>
                   <div class="form-grid detail-form">
+                    ${this._entityPicker("Geglättete Leistung für Prognose (optional)", battery.average_power, (value) => this._updateBattery(index, { average_power: value }))}
+                    ${this._optionalNumberInput("Max. Ladeleistung [kW]", battery.max_charge_power_kw, "optional", (value) => this._updateBattery(index, { max_charge_power_kw: value }), {
+			min: 0,
+			step: .1
+		})}
+                    ${this._optionalNumberInput("Max. Entladeleistung [kW]", battery.max_discharge_power_kw, "optional", (value) => this._updateBattery(index, { max_discharge_power_kw: value }), {
+			min: 0,
+			step: .1
+		})}
                     ${this._entityPicker("Batteriespannung", battery.voltage, (value) => this._updateBattery(index, { voltage: value }))}
                     ${this._entityPicker("Batteriestrom", battery.current, (value) => this._updateBattery(index, { current: value }))}
                     ${this._entityPicker("Temperatur", battery.temperature, (value) => this._updateBattery(index, { temperature: value }))}
@@ -1387,7 +1413,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.7";
+var CARD_VERSION = "0.2.8";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1606,6 +1632,151 @@ var AdvancedPowerFlowCard = class extends i {
 		if (p === void 0) return "Status —";
 		if (Math.abs(p) <= this._threshold()) return "Ruhe";
 		return (config.positive_is_charging ?? true ? p > 0 : p < 0) ? "Lädt" : "Entlädt";
+	}
+	_batteryStoragePowerInfo(config) {
+		const average = this._powerW(config.average_power);
+		const raw = average !== void 0 ? average : this._powerW(config.power);
+		const source = average !== void 0 ? "average" : "current";
+		if (raw === void 0) return { source };
+		return {
+			value: config.positive_is_charging ?? true ? raw : -raw,
+			source
+		};
+	}
+	_batteryEstimate(config) {
+		const powerInfo = this._batteryStoragePowerInfo(config);
+		const signedStoragePower = powerInfo.value;
+		const minPower = Math.max(this._threshold(), config.estimate_min_power_w ?? 100);
+		const targetSoc = this._clampPercent(config.target_soc ?? 100) ?? 100;
+		const reserveSoc = Math.min(targetSoc, this._clampPercent(config.reserve_soc ?? 0) ?? 0);
+		let currentEnergyWh = this._energyWh(config.remaining_energy);
+		const soc = this._clampPercent(this._number(config.soc));
+		let capacityWh = config.capacity_kwh && config.capacity_kwh > 0 ? config.capacity_kwh * 1e3 : void 0;
+		let capacityInferred = false;
+		if (capacityWh === void 0 && currentEnergyWh !== void 0 && soc !== void 0 && soc > .5) {
+			capacityWh = currentEnergyWh / (soc / 100);
+			capacityInferred = true;
+		}
+		if (currentEnergyWh === void 0 && capacityWh !== void 0 && soc !== void 0) currentEnergyWh = capacityWh * soc / 100;
+		if (signedStoragePower === void 0) return {
+			mode: "unavailable",
+			powerSource: powerInfo.source,
+			capacityWh,
+			capacityInferred,
+			currentEnergyWh,
+			targetSoc,
+			reserveSoc
+		};
+		if (Math.abs(signedStoragePower) < minPower) return {
+			mode: "idle",
+			powerW: Math.abs(signedStoragePower),
+			powerSource: powerInfo.source,
+			capacityWh,
+			capacityInferred,
+			currentEnergyWh,
+			targetSoc,
+			reserveSoc
+		};
+		const charging = signedStoragePower > 0;
+		const mode = charging ? "charging" : "discharging";
+		const powerW = Math.abs(signedStoragePower);
+		let energyDeltaWh;
+		if (charging && capacityWh !== void 0 && currentEnergyWh !== void 0) {
+			const targetWh = capacityWh * targetSoc / 100;
+			energyDeltaWh = Math.max(0, targetWh - currentEnergyWh);
+		} else if (!charging && currentEnergyWh !== void 0) {
+			const reserveWh = capacityWh !== void 0 ? capacityWh * reserveSoc / 100 : reserveSoc <= 0 ? 0 : void 0;
+			if (reserveWh !== void 0) energyDeltaWh = Math.max(0, currentEnergyWh - reserveWh);
+		}
+		const hours = energyDeltaWh !== void 0 && powerW >= minPower ? energyDeltaWh / powerW : void 0;
+		const maxPowerKw = charging ? config.max_charge_power_kw : config.max_discharge_power_kw;
+		const loadPercent = maxPowerKw && maxPowerKw > 0 ? this._clampPercent(powerW / (maxPowerKw * 1e3) * 100) : void 0;
+		return {
+			mode,
+			powerW,
+			powerSource: powerInfo.source,
+			capacityWh,
+			capacityInferred,
+			currentEnergyWh,
+			targetSoc,
+			reserveSoc,
+			energyDeltaWh,
+			hours,
+			expectedTime: hours !== void 0 ? this._expectedClockTime(hours) : void 0,
+			loadPercent
+		};
+	}
+	_batteryFleetEstimate() {
+		const batteries = this._config.batteries ?? [];
+		if (!batteries.length) return { mode: "unavailable" };
+		const estimates = batteries.map((battery) => this._batteryEstimate(battery));
+		const validPowers = batteries.map((battery) => this._batteryStoragePowerInfo(battery).value).filter((value) => value !== void 0);
+		const chargePowerW = validPowers.reduce((sum, value) => sum + Math.max(0, value), 0);
+		const dischargePowerW = validPowers.reduce((sum, value) => sum + Math.max(0, -value), 0);
+		const netChargePowerW = validPowers.length === batteries.length ? validPowers.reduce((sum, value) => sum + value, 0) : void 0;
+		const hasCharging = chargePowerW > this._threshold();
+		const hasDischarging = dischargePowerW > this._threshold();
+		const mode = validPowers.length !== batteries.length ? "unavailable" : hasCharging && hasDischarging ? "mixed" : hasCharging ? "charging" : hasDischarging ? "discharging" : "idle";
+		const capacities = estimates.map((estimate) => estimate.capacityWh);
+		const stored = estimates.map((estimate) => estimate.currentEnergyWh);
+		const capacityWh = capacities.every((value) => value !== void 0) ? capacities.reduce((sum, value) => sum + value, 0) : void 0;
+		const storedWh = stored.every((value) => value !== void 0) ? stored.reduce((sum, value) => sum + value, 0) : void 0;
+		const soc = capacityWh !== void 0 && capacityWh > 0 && storedWh !== void 0 ? this._clampPercent(storedWh / capacityWh * 100) : void 0;
+		let energyDeltaWh;
+		if (mode === "charging") {
+			const deltas = estimates.map((estimate) => estimate.capacityWh !== void 0 && estimate.currentEnergyWh !== void 0 ? Math.max(0, estimate.capacityWh * estimate.targetSoc / 100 - estimate.currentEnergyWh) : void 0);
+			if (deltas.every((value) => value !== void 0)) energyDeltaWh = deltas.reduce((sum, value) => sum + value, 0);
+		} else if (mode === "discharging") {
+			const deltas = estimates.map((estimate) => {
+				if (estimate.currentEnergyWh === void 0) return void 0;
+				const reserveWh = estimate.capacityWh !== void 0 ? estimate.capacityWh * estimate.reserveSoc / 100 : estimate.reserveSoc <= 0 ? 0 : void 0;
+				if (reserveWh === void 0) return void 0;
+				return Math.max(0, estimate.currentEnergyWh - reserveWh);
+			});
+			if (deltas.every((value) => value !== void 0)) energyDeltaWh = deltas.reduce((sum, value) => sum + value, 0);
+		}
+		const usableNetPower = netChargePowerW !== void 0 ? Math.abs(netChargePowerW) : void 0;
+		const hours = energyDeltaWh !== void 0 && usableNetPower !== void 0 && usableNetPower >= 100 ? energyDeltaWh / usableNetPower : void 0;
+		return {
+			capacityWh,
+			storedWh,
+			soc,
+			netChargePowerW,
+			chargePowerW,
+			dischargePowerW,
+			hours,
+			expectedTime: hours !== void 0 ? this._expectedClockTime(hours) : void 0,
+			mode,
+			energyDeltaWh
+		};
+	}
+	_formatHours(hours) {
+		if (hours === void 0 || !Number.isFinite(hours)) return "—";
+		if (hours < .05) return "< 0,1 h";
+		return `${hours.toLocaleString(void 0, {
+			minimumFractionDigits: hours < 10 ? 1 : 0,
+			maximumFractionDigits: hours < 10 ? 1 : 0
+		})} h`;
+	}
+	_expectedClockTime(hours) {
+		if (!Number.isFinite(hours) || hours < 0) return void 0;
+		const end = new Date(Date.now() + hours * 36e5);
+		if (hours < 30) return end.toLocaleTimeString(void 0, {
+			hour: "2-digit",
+			minute: "2-digit"
+		});
+		return end.toLocaleString(void 0, {
+			day: "2-digit",
+			month: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit"
+		});
+	}
+	_batteryEtaNodeText(config) {
+		const estimate = this._batteryEstimate(config);
+		if (estimate.hours === void 0) return void 0;
+		if (estimate.mode === "charging") return `≈ ${this._formatHours(estimate.hours)} bis ${estimate.targetSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %`;
+		if (estimate.mode === "discharging") return `≈ ${this._formatHours(estimate.hours)} bis ${estimate.reserveSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %`;
 	}
 	_directConsumersPowerW() {
 		let total = 0;
@@ -2129,7 +2300,11 @@ var AdvancedPowerFlowCard = class extends i {
 						id: `battery-${index}`,
 						title: battery.name ?? `Batterie ${index + 1}`,
 						main: this._formatPower(battery.power, true),
-						sub: `${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}`,
+						sub: [
+							this._batteryStatus(battery),
+							this._formatSoc(battery.soc),
+							this._batteryEtaNodeText(battery)
+						].filter(Boolean).join(" · "),
 						entity: battery.power ?? battery.soc,
 						kind: "battery",
 						x,
@@ -2463,9 +2638,13 @@ var AdvancedPowerFlowCard = class extends i {
 		const dischargeWh = this._energyWh(battery.daily_discharge_energy);
 		const energyRatio = chargeWh !== void 0 && dischargeWh !== void 0 && chargeWh > 0 ? dischargeWh / chargeWh * 100 : void 0;
 		const equivalentCycles = battery.capacity_kwh && battery.capacity_kwh > 0 && chargeWh !== void 0 && dischargeWh !== void 0 ? (chargeWh + dischargeWh) / (2 * battery.capacity_kwh * 1e3) : void 0;
+		const estimate = this._batteryEstimate(battery);
+		const fleet = this._batteryFleetEstimate();
 		const warnings = this._batteryWarnings(battery);
+		const batteries = this._config.batteries ?? [];
 		const hasAny = [
 			battery.power,
+			battery.average_power,
 			battery.soc,
 			battery.voltage,
 			battery.current,
@@ -2479,23 +2658,79 @@ var AdvancedPowerFlowCard = class extends i {
 			battery.remaining_energy,
 			battery.daily_charge_energy,
 			battery.daily_discharge_energy
-		].some(Boolean);
+		].some(Boolean) || battery.capacity_kwh !== void 0 || battery.target_soc !== void 0 || battery.reserve_soc !== void 0 || battery.max_charge_power_kw !== void 0 || battery.max_discharge_power_kw !== void 0;
+		const estimateLabel = estimate.mode === "charging" ? `Bis Ziel-SOC ${estimate.targetSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %` : estimate.mode === "discharging" ? `Bis Reserve-SOC ${estimate.reserveSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %` : void 0;
+		const fleetModeLabel = {
+			charging: "Lädt",
+			discharging: "Entlädt",
+			idle: "Ruhe",
+			mixed: "Gemischter Betrieb",
+			unavailable: "Unvollständig"
+		};
+		const gridNet = this._gridNetToHouseW();
+		const pvToBatteryEstimate = fleet.mode === "charging" && (fleet.chargePowerW ?? 0) > this._threshold() && gridNet !== void 0 && gridNet <= this._threshold() ? fleet.chargePowerW : void 0;
 		return b`
       <div class="heat-details battery-details">
         <div class="heat-details-head">
           <div>
             <div class="heat-title">▰ ${battery.name ?? `Batterie ${index + 1}`}</div>
-            <div class="heat-subtitle">${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}</div>
+            <div class="heat-subtitle">
+              ${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}
+              ${estimate.hours !== void 0 ? ` · ${this._formatHours(estimate.hours)}` : ""}
+            </div>
           </div>
           <button @click=${() => {
 			this._expandedBattery = void 0;
 		}}>Schließen</button>
         </div>
+
+        ${batteries.length > 1 ? b`
+            <div class="battery-fleet-summary">
+              <div class="battery-fleet-head">
+                <strong>▰ Batterie-Gesamtübersicht</strong>
+                <span>${fleetModeLabel[fleet.mode]}</span>
+              </div>
+              <div class="battery-fleet-grid">
+                ${fleet.soc !== void 0 ? this._detailValueItem("Gesamt-SOC", this._formatPercent(fleet.soc), "kapazitätsgewichtet") : A}
+                ${fleet.capacityWh !== void 0 ? this._detailValueItem("Nutzbare Kapazität gesamt", this._formatEnergyWh(fleet.capacityWh)) : A}
+                ${fleet.storedWh !== void 0 ? this._detailValueItem("Gespeicherte Energie gesamt", this._formatEnergyWh(fleet.storedWh)) : A}
+                ${fleet.chargePowerW !== void 0 && fleet.chargePowerW > this._threshold() ? this._detailValueItem("Ladeleistung gesamt", this._formatW(fleet.chargePowerW, true)) : A}
+                ${fleet.dischargePowerW !== void 0 && fleet.dischargePowerW > this._threshold() ? this._detailValueItem("Entladeleistung gesamt", this._formatW(fleet.dischargePowerW, true)) : A}
+                ${fleet.energyDeltaWh !== void 0 ? this._detailValueItem(fleet.mode === "charging" ? "Noch zu laden gesamt" : "Verfügbar bis Reserve gesamt", this._formatEnergyWh(fleet.energyDeltaWh)) : A}
+                ${fleet.hours !== void 0 ? this._detailValueItem(fleet.mode === "charging" ? "Gemeinsame Ladeprognose" : "Gemeinsame Restlaufzeit", this._formatHours(fleet.hours), fleet.expectedTime ? `voraussichtlich bis ${fleet.expectedTime}` : void 0) : A}
+                ${pvToBatteryEstimate !== void 0 ? this._detailValueItem("PV-Überschuss → Akkus", this._formatW(pvToBatteryEstimate, true), "geschätzt bei fehlendem relevantem Netzbezug") : A}
+              </div>
+            </div>
+          ` : A}
+
         ${warnings.length ? b`<div class="detail-warning"><strong>⚠ Diagnose</strong><span>${warnings.join(" · ")}</span></div>` : A}
+
         ${hasAny ? b`
+            ${estimateLabel && estimate.hours !== void 0 ? b`
+                <div class="battery-estimate-card">
+                  <div>
+                    <span>${estimate.mode === "charging" ? "Geschätzte Ladedauer" : "Geschätzte Restlaufzeit"}</span>
+                    <strong>${this._formatHours(estimate.hours)}</strong>
+                  </div>
+                  <div>
+                    <span>${estimateLabel}</span>
+                    <strong>${estimate.expectedTime ?? "—"}</strong>
+                    <small>bei ungefähr konstanter Leistung</small>
+                  </div>
+                </div>
+              ` : A}
+
             <div class="detail-grid">
               ${this._detailItem("Leistung", battery.power)}
+              ${battery.average_power ? this._detailItem("Geglättete Prognoseleistung", battery.average_power) : A}
               ${this._detailItem("Ladezustand", battery.soc, "%")}
+              ${battery.capacity_kwh !== void 0 ? this._detailValueItem("Nutzbare Kapazität", `${battery.capacity_kwh.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh`) : estimate.capacityWh !== void 0 && estimate.capacityInferred ? this._detailValueItem("Kapazität geschätzt", this._formatEnergyWh(estimate.capacityWh), "aus Restenergie und SOC abgeleitet") : A}
+              ${estimate.currentEnergyWh !== void 0 ? this._detailValueItem("Aktuell gespeichert", this._formatEnergyWh(estimate.currentEnergyWh), battery.remaining_energy ? "aus Restenergie-Sensor" : "aus SOC × Kapazität berechnet") : A}
+              ${estimate.mode === "charging" && estimate.energyDeltaWh !== void 0 ? this._detailValueItem(`Noch bis ${estimate.targetSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %`, this._formatEnergyWh(estimate.energyDeltaWh)) : A}
+              ${estimate.mode === "discharging" && estimate.energyDeltaWh !== void 0 ? this._detailValueItem(`Verfügbar bis ${estimate.reserveSoc.toLocaleString(void 0, { maximumFractionDigits: 0 })} %`, this._formatEnergyWh(estimate.energyDeltaWh)) : A}
+              ${estimate.powerW !== void 0 && (estimate.mode === "charging" || estimate.mode === "discharging") ? this._detailValueItem("Prognoseleistung", this._formatW(estimate.powerW, true), estimate.powerSource === "average" ? "geglätteter Leistungssensor" : "momentane Batterieleistung") : A}
+              ${estimate.loadPercent !== void 0 ? this._detailValueItem(estimate.mode === "charging" ? "Ladeleistung relativ zum Maximum" : "Entladeleistung relativ zum Maximum", this._formatPercent(estimate.loadPercent)) : A}
+              ${estimate.hours !== void 0 ? this._detailValueItem(estimate.mode === "charging" ? "Geschätzte Ladedauer" : "Geschätzte Restlaufzeit", this._formatHours(estimate.hours), estimate.expectedTime ? `Ziel voraussichtlich ${estimate.expectedTime}` : void 0) : A}
               ${this._detailItem("Batteriespannung", battery.voltage, "V")}
               ${this._detailItem("Batteriestrom", battery.current, "A")}
               ${this._detailItem("Temperatur", battery.temperature, "°C")}
@@ -2511,6 +2746,10 @@ var AdvancedPowerFlowCard = class extends i {
               ${this._detailItem("Entladeenergie heute", battery.daily_discharge_energy)}
               ${energyRatio !== void 0 ? this._detailValueItem("Entladen / Laden heute", `${energyRatio.toLocaleString(void 0, { maximumFractionDigits: 1 })} %`, "Kein echter Wirkungsgrad; SOC-Verschiebung möglich") : A}
               ${equivalentCycles !== void 0 ? this._detailValueItem("Äquivalente Zyklen heute", equivalentCycles.toLocaleString(void 0, { maximumFractionDigits: 2 }), `bei ${battery.capacity_kwh?.toLocaleString(void 0, { maximumFractionDigits: 1 })} kWh Kapazität`) : A}
+            </div>
+            <div class="estimate-note">
+              Prognosen setzen annähernd konstante Lade-/Entladeleistung voraus. BMS-Limits, hoher SOC,
+              wechselnde Verbraucher und PV-Leistung können die tatsächliche Dauer verändern.
             </div>
           ` : b`<div class="empty-detail">Noch keine Detail-Entities für diese Batterie konfiguriert.</div>`}
       </div>
@@ -3462,6 +3701,71 @@ var AdvancedPowerFlowCard = class extends i {
       border-color: color-mix(in srgb, var(--apfc-battery) 30%, var(--divider-color));
     }
 
+    .battery-fleet-summary {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 32%, var(--divider-color));
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--apfc-battery) 6%, transparent);
+    }
+
+    .battery-fleet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: var(--primary-text-color);
+    }
+
+    .battery-fleet-head span {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--apfc-battery) 13%, transparent);
+      color: var(--secondary-text-color);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .battery-fleet-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+
+    .battery-estimate-card {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 44%, var(--divider-color));
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--apfc-battery) 9%, transparent);
+    }
+
+    .battery-estimate-card > div {
+      display: grid;
+      gap: 3px;
+    }
+
+    .battery-estimate-card span,
+    .battery-estimate-card small,
+    .estimate-note {
+      color: var(--secondary-text-color);
+      font-size: 11px;
+    }
+
+    .battery-estimate-card strong {
+      color: var(--primary-text-color);
+      font-size: 18px;
+    }
+
+    .estimate-note {
+      margin-top: 12px;
+      line-height: 1.45;
+    }
+
     .pv-daily-details {
       border-color: color-mix(in srgb, var(--apfc-solar) 34%, var(--divider-color));
     }
@@ -3735,6 +4039,8 @@ var AdvancedPowerFlowCard = class extends i {
       .daily-balance-columns { grid-template-columns: 1fr; }
       .daily-balance-residual { align-items: flex-start; }
       .diagnostic-row { align-items: flex-start; }
+      .battery-estimate-card { grid-template-columns: 1fr; }
+      .battery-fleet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (prefers-reduced-motion: reduce) {

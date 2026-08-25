@@ -73,13 +73,14 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     value: number | undefined,
     fallback: number,
     onChange: (value: number) => void,
-    options: { min?: number; step?: number } = {}
+    options: { min?: number; max?: number; step?: number } = {}
   ) {
     return html`
       <label>${label}</label>
       <input
         type="number"
         min=${String(options.min ?? 0)}
+        max=${options.max === undefined ? "" : String(options.max)}
         step=${String(options.step ?? 1)}
         .value=${String(value ?? fallback)}
         @input=${(event: Event) => {
@@ -95,13 +96,14 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
     value: number | undefined,
     placeholder: string,
     onChange: (value: number | undefined) => void,
-    options: { min?: number; step?: number } = {}
+    options: { min?: number; max?: number; step?: number } = {}
   ) {
     return html`
       <label>${label}</label>
       <input
         type="number"
         min=${String(options.min ?? 0)}
+        max=${options.max === undefined ? "" : String(options.max)}
         step=${String(options.step ?? 0.01)}
         .value=${value === undefined ? "" : String(value)}
         placeholder=${placeholder}
@@ -282,12 +284,19 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                   ${this._entityPicker("Leistung", battery.power, (value) => this._updateBattery(index, { power: value }))}
                   ${this._entityPicker("SOC", battery.soc, (value) => this._updateBattery(index, { soc: value }))}
                   ${this._optionalNumberInput("Nutzbare Kapazität [kWh]", battery.capacity_kwh, "optional", (value) => this._updateBattery(index, { capacity_kwh: value }), { step: 0.1 })}
+                  ${this._optionalNumberInput("Ziel-SOC [%]", battery.target_soc, "100", (value) => this._updateBattery(index, { target_soc: value }), { min: 0, max: 100, step: 1 })}
+                  ${this._optionalNumberInput("Reserve-SOC [%]", battery.reserve_soc, "0", (value) => this._updateBattery(index, { reserve_soc: value }), { min: 0, max: 100, step: 1 })}
+                  ${this._optionalNumberInput("Prognose erst ab [W]", battery.estimate_min_power_w, "100", (value) => this._updateBattery(index, { estimate_min_power_w: value }), { min: 0, step: 10 })}
                   ${this._checkbox("Positiver Wert bedeutet Laden", battery.positive_is_charging, true, (value) => this._updateBattery(index, { positive_is_charging: value }))}
+                  <div class="help">Für Lade-/Restlaufzeit werden Kapazität + SOC bzw. Restenergie und eine ausreichend hohe Batterieleistung benötigt.</div>
                 </div>
 
                 <details class="optional-details">
                   <summary>Batterie-Detaildaten</summary>
                   <div class="form-grid detail-form">
+                    ${this._entityPicker("Geglättete Leistung für Prognose (optional)", battery.average_power, (value) => this._updateBattery(index, { average_power: value }))}
+                    ${this._optionalNumberInput("Max. Ladeleistung [kW]", battery.max_charge_power_kw, "optional", (value) => this._updateBattery(index, { max_charge_power_kw: value }), { min: 0, step: 0.1 })}
+                    ${this._optionalNumberInput("Max. Entladeleistung [kW]", battery.max_discharge_power_kw, "optional", (value) => this._updateBattery(index, { max_discharge_power_kw: value }), { min: 0, step: 0.1 })}
                     ${this._entityPicker("Batteriespannung", battery.voltage, (value) => this._updateBattery(index, { voltage: value }))}
                     ${this._entityPicker("Batteriestrom", battery.current, (value) => this._updateBattery(index, { current: value }))}
                     ${this._entityPicker("Temperatur", battery.temperature, (value) => this._updateBattery(index, { temperature: value }))}

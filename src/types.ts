@@ -45,6 +45,12 @@ export interface BatteryConfig {
   daily_charge_energy?: string;
   daily_discharge_energy?: string;
   capacity_kwh?: number;
+  target_soc?: number;
+  reserve_soc?: number;
+  estimate_min_power_w?: number;
+  average_power?: string;
+  max_charge_power_kw?: number;
+  max_discharge_power_kw?: number;
 }
 
 export interface GridConfig {

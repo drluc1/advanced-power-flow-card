@@ -54,6 +54,12 @@ batteries:
     soc: sensor.battery_1_soc
     positive_is_charging: true
     capacity_kwh: 5.0
+    target_soc: 90
+    reserve_soc: 10
+    estimate_min_power_w: 100
+    average_power: sensor.battery_1_power_5min
+    max_charge_power_kw: 3.0
+    max_discharge_power_kw: 3.0
     voltage: sensor.battery_1_voltage
     current: sensor.battery_1_current
     temperature: sensor.battery_1_temperature
@@ -66,6 +72,10 @@ batteries:
     power: sensor.battery_2_power
     soc: sensor.battery_2_soc
     positive_is_charging: true
+    capacity_kwh: 9.6
+    target_soc: 90
+    reserve_soc: 10
+    estimate_min_power_w: 100
 
 grid:
   power: sensor.grid_power

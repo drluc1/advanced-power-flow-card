@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.8
+
+- Added estimated remaining battery charging time and discharge runtime in hours.
+- Added configurable `target_soc`, `reserve_soc` and `estimate_min_power_w` per battery.
+- Added optional `average_power` entity for smoother time estimates.
+- Added expected target/reserve clock time and remaining energy to target/reserve.
+- Added optional `max_charge_power_kw` and `max_discharge_power_kw` with live utilization percentage.
+- Battery nodes now include a compact ETA when a reliable estimate can be calculated.
+- Added a multi-battery overview with capacity-weighted SOC, total stored energy, aggregate charging/discharging power and common runtime estimate.
+- Added a conservative PV-to-battery surplus indicator when batteries are charging without relevant grid import.
+- Battery capacity can be inferred approximately from remaining energy and SOC when an explicit usable capacity is not configured.
+- Added explanatory forecast notes to make clear that estimates assume approximately constant power.
+
 ## 0.2.7
 
 - Added optional `daily_energy` and `daily_peak_power` entities to every MPPT/sub-PV input.

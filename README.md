@@ -2,17 +2,20 @@
 
 Flexible Home Assistant Lovelace power-flow card with dynamic PV systems, MPPTs, batteries, grid, house load, heat pump and additional consumers.
 
-## v0.2.7 highlights
+## v0.2.8 highlights
 
 - Unlimited PV systems and MPPT/sub-PV inputs.
-- MPPTs can now have their own daily-energy and daily-peak entities.
-- Automatic MPPT specific daily yield in kWh/kWp and daily share of the parent PV system.
-- Optional daily MPPT underperformance diagnostics based on kWh/kWp.
+- Battery charge-time and discharge-runtime estimates in hours when enough battery data is available.
+- Configurable target SOC, reserve SOC and minimum power threshold for stable estimates.
+- Optional smoothed/average battery-power entity for less jumpy forecasts.
+- Expected target time (clock time) and remaining energy to target/reserve.
+- Optional maximum charge/discharge power with live utilization percentage.
+- Multi-battery overview with capacity-weighted SOC, stored energy, aggregate power and common runtime estimate.
+- MPPT daily-energy, daily peak, kWh/kWp and daily-share analytics.
 - Click a PV-system total node for live and daily MPPT analytics.
 - Clicking `Haus heute` opens a daily energy balance for PV, grid, batteries and house consumption.
-- Heat-pump daily performance factor/JAZ can be read directly or calculated from thermal/electrical daily energy.
+- Heat-pump live COP and daily performance factor/JAZ can be read directly or calculated.
 - Automatic Autarky and Eigenverbrauch daily metrics.
-- Battery detail panels with cell voltages, temperature, SOH, cycles and daily energy.
 - Automatic house consumption calculation when no house-power entity is configured.
 
 ## Build
@@ -123,6 +126,12 @@ batteries:
     soc: sensor.battery_soc
     positive_is_charging: true
     capacity_kwh: 9.6
+    target_soc: 90
+    reserve_soc: 10
+    estimate_min_power_w: 100
+    average_power: sensor.battery_power_5min
+    max_charge_power_kw: 5.0
+    max_discharge_power_kw: 5.0
     voltage: sensor.battery_voltage
     current: sensor.battery_current
     temperature: sensor.battery_temperature
@@ -136,6 +145,19 @@ batteries:
     daily_charge_energy: sensor.battery_charge_today
     daily_discharge_energy: sensor.battery_discharge_today
 ```
+
+When enough values are available, the card estimates battery charging or discharge runtime:
+
+```text
+charging time = energy still required to target SOC / charging power
+runtime       = energy available above reserve SOC / discharge power
+```
+
+`remaining_energy` is treated as the battery's currently stored usable energy. If it is not configured, the card can calculate stored energy from `SOC × capacity_kwh`. If `capacity_kwh` is missing but `remaining_energy` and SOC are available, the capacity can be approximately inferred.
+
+`average_power` is optional. When configured and available it is preferred for the forecast; otherwise the live `power` entity is used. `estimate_min_power_w` prevents meaningless very-long estimates at standby power. The calculated clock time and duration are estimates because BMS limits, changing loads, PV output and tapering near full SOC can change the real result.
+
+With multiple batteries, opening any battery also shows a combined overview with capacity-weighted SOC, total stored energy, aggregate charge/discharge power and a common estimate when all required battery data is available.
 
 When daily charge/discharge energy and `capacity_kwh` are available, the detail view additionally estimates equivalent daily cycles. The displayed discharge/charge ratio is not a true round-trip efficiency because the battery SOC can change during the day.
 

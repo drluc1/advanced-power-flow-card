@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.2.7";
+const CARD_VERSION = "0.2.8";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -64,6 +64,34 @@ interface DiagnosticMessage {
   title: string;
   detail: string;
   nodeId?: string;
+}
+
+interface BatteryEstimate {
+  mode: "charging" | "discharging" | "idle" | "unavailable";
+  powerW?: number;
+  powerSource: "average" | "current";
+  capacityWh?: number;
+  capacityInferred: boolean;
+  currentEnergyWh?: number;
+  targetSoc: number;
+  reserveSoc: number;
+  energyDeltaWh?: number;
+  hours?: number;
+  expectedTime?: string;
+  loadPercent?: number;
+}
+
+interface BatteryFleetEstimate {
+  capacityWh?: number;
+  storedWh?: number;
+  soc?: number;
+  netChargePowerW?: number;
+  chargePowerW?: number;
+  dischargePowerW?: number;
+  hours?: number;
+  expectedTime?: string;
+  mode: "charging" | "discharging" | "idle" | "mixed" | "unavailable";
+  energyDeltaWh?: number;
 }
 
 interface LayoutResult {
@@ -368,6 +396,224 @@ export class AdvancedPowerFlowCard extends LitElement {
     const positiveCharging = config.positive_is_charging ?? true;
     const charging = positiveCharging ? p > 0 : p < 0;
     return charging ? "Lädt" : "Entlädt";
+  }
+
+  private _batteryStoragePowerInfo(config: BatteryConfig): {
+    value?: number;
+    source: "average" | "current";
+  } {
+    const average = this._powerW(config.average_power);
+    const raw = average !== undefined ? average : this._powerW(config.power);
+    const source = average !== undefined ? "average" : "current";
+    if (raw === undefined) return { source };
+
+    // Positive = energy flowing into the battery, negative = energy flowing out.
+    const positiveCharging = config.positive_is_charging ?? true;
+    return {
+      value: positiveCharging ? raw : -raw,
+      source
+    };
+  }
+
+  private _batteryEstimate(config: BatteryConfig): BatteryEstimate {
+    const powerInfo = this._batteryStoragePowerInfo(config);
+    const signedStoragePower = powerInfo.value;
+    const minPower = Math.max(this._threshold(), config.estimate_min_power_w ?? 100);
+    const targetSoc = this._clampPercent(config.target_soc ?? 100) ?? 100;
+    const reserveSoc = Math.min(targetSoc, this._clampPercent(config.reserve_soc ?? 0) ?? 0);
+
+    let currentEnergyWh = this._energyWh(config.remaining_energy);
+    const soc = this._clampPercent(this._number(config.soc));
+    let capacityWh = config.capacity_kwh && config.capacity_kwh > 0
+      ? config.capacity_kwh * 1000
+      : undefined;
+    let capacityInferred = false;
+
+    if (capacityWh === undefined && currentEnergyWh !== undefined && soc !== undefined && soc > 0.5) {
+      capacityWh = currentEnergyWh / (soc / 100);
+      capacityInferred = true;
+    }
+
+    if (currentEnergyWh === undefined && capacityWh !== undefined && soc !== undefined) {
+      currentEnergyWh = capacityWh * soc / 100;
+    }
+
+    if (signedStoragePower === undefined) {
+      return {
+        mode: "unavailable",
+        powerSource: powerInfo.source,
+        capacityWh,
+        capacityInferred,
+        currentEnergyWh,
+        targetSoc,
+        reserveSoc
+      };
+    }
+
+    if (Math.abs(signedStoragePower) < minPower) {
+      return {
+        mode: "idle",
+        powerW: Math.abs(signedStoragePower),
+        powerSource: powerInfo.source,
+        capacityWh,
+        capacityInferred,
+        currentEnergyWh,
+        targetSoc,
+        reserveSoc
+      };
+    }
+
+    const charging = signedStoragePower > 0;
+    const mode = charging ? "charging" : "discharging";
+    const powerW = Math.abs(signedStoragePower);
+    let energyDeltaWh: number | undefined;
+
+    if (charging && capacityWh !== undefined && currentEnergyWh !== undefined) {
+      const targetWh = capacityWh * targetSoc / 100;
+      energyDeltaWh = Math.max(0, targetWh - currentEnergyWh);
+    } else if (!charging && currentEnergyWh !== undefined) {
+      const reserveWh = capacityWh !== undefined ? capacityWh * reserveSoc / 100 : (reserveSoc <= 0 ? 0 : undefined);
+      if (reserveWh !== undefined) {
+        energyDeltaWh = Math.max(0, currentEnergyWh - reserveWh);
+      }
+    }
+
+    const hours = energyDeltaWh !== undefined && powerW >= minPower
+      ? energyDeltaWh / powerW
+      : undefined;
+
+    const maxPowerKw = charging ? config.max_charge_power_kw : config.max_discharge_power_kw;
+    const loadPercent = maxPowerKw && maxPowerKw > 0
+      ? this._clampPercent(powerW / (maxPowerKw * 1000) * 100)
+      : undefined;
+
+    return {
+      mode,
+      powerW,
+      powerSource: powerInfo.source,
+      capacityWh,
+      capacityInferred,
+      currentEnergyWh,
+      targetSoc,
+      reserveSoc,
+      energyDeltaWh,
+      hours,
+      expectedTime: hours !== undefined ? this._expectedClockTime(hours) : undefined,
+      loadPercent
+    };
+  }
+
+  private _batteryFleetEstimate(): BatteryFleetEstimate {
+    const batteries = this._config.batteries ?? [];
+    if (!batteries.length) return { mode: "unavailable" };
+
+    const estimates = batteries.map((battery) => this._batteryEstimate(battery));
+    const powers = batteries.map((battery) => this._batteryStoragePowerInfo(battery).value);
+
+    const validPowers = powers.filter((value): value is number => value !== undefined);
+    const chargePowerW = validPowers.reduce((sum, value) => sum + Math.max(0, value), 0);
+    const dischargePowerW = validPowers.reduce((sum, value) => sum + Math.max(0, -value), 0);
+    const netChargePowerW = validPowers.length === batteries.length
+      ? validPowers.reduce((sum, value) => sum + value, 0)
+      : undefined;
+
+    const hasCharging = chargePowerW > this._threshold();
+    const hasDischarging = dischargePowerW > this._threshold();
+    const mode: BatteryFleetEstimate["mode"] =
+      validPowers.length !== batteries.length
+        ? "unavailable"
+        : hasCharging && hasDischarging
+          ? "mixed"
+          : hasCharging
+            ? "charging"
+            : hasDischarging
+              ? "discharging"
+              : "idle";
+
+    const capacities = estimates.map((estimate) => estimate.capacityWh);
+    const stored = estimates.map((estimate) => estimate.currentEnergyWh);
+    const capacityWh = capacities.every((value) => value !== undefined)
+      ? (capacities as number[]).reduce((sum, value) => sum + value, 0)
+      : undefined;
+    const storedWh = stored.every((value) => value !== undefined)
+      ? (stored as number[]).reduce((sum, value) => sum + value, 0)
+      : undefined;
+    const soc = capacityWh !== undefined && capacityWh > 0 && storedWh !== undefined
+      ? this._clampPercent(storedWh / capacityWh * 100)
+      : undefined;
+
+    let energyDeltaWh: number | undefined;
+    if (mode === "charging") {
+      const deltas = estimates.map((estimate) =>
+        estimate.capacityWh !== undefined && estimate.currentEnergyWh !== undefined
+          ? Math.max(0, estimate.capacityWh * estimate.targetSoc / 100 - estimate.currentEnergyWh)
+          : undefined
+      );
+      if (deltas.every((value) => value !== undefined)) {
+        energyDeltaWh = (deltas as number[]).reduce((sum, value) => sum + value, 0);
+      }
+    } else if (mode === "discharging") {
+      const deltas = estimates.map((estimate) => {
+        if (estimate.currentEnergyWh === undefined) return undefined;
+        const reserveWh = estimate.capacityWh !== undefined
+          ? estimate.capacityWh * estimate.reserveSoc / 100
+          : estimate.reserveSoc <= 0 ? 0 : undefined;
+        if (reserveWh === undefined) return undefined;
+        return Math.max(0, estimate.currentEnergyWh - reserveWh);
+      });
+      if (deltas.every((value) => value !== undefined)) {
+        energyDeltaWh = (deltas as number[]).reduce((sum, value) => sum + value, 0);
+      }
+    }
+
+    const usableNetPower = netChargePowerW !== undefined ? Math.abs(netChargePowerW) : undefined;
+    const hours = energyDeltaWh !== undefined && usableNetPower !== undefined && usableNetPower >= 100
+      ? energyDeltaWh / usableNetPower
+      : undefined;
+
+    return {
+      capacityWh,
+      storedWh,
+      soc,
+      netChargePowerW,
+      chargePowerW,
+      dischargePowerW,
+      hours,
+      expectedTime: hours !== undefined ? this._expectedClockTime(hours) : undefined,
+      mode,
+      energyDeltaWh
+    };
+  }
+
+  private _formatHours(hours?: number): string {
+    if (hours === undefined || !Number.isFinite(hours)) return "—";
+    if (hours < 0.05) return "< 0,1 h";
+    return `${hours.toLocaleString(undefined, {
+      minimumFractionDigits: hours < 10 ? 1 : 0,
+      maximumFractionDigits: hours < 10 ? 1 : 0
+    })} h`;
+  }
+
+  private _expectedClockTime(hours: number): string | undefined {
+    if (!Number.isFinite(hours) || hours < 0) return undefined;
+    const end = new Date(Date.now() + hours * 3_600_000);
+    if (hours < 30) {
+      return end.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    }
+    return end.toLocaleString(undefined, {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  private _batteryEtaNodeText(config: BatteryConfig): string | undefined {
+    const estimate = this._batteryEstimate(config);
+    if (estimate.hours === undefined) return undefined;
+    if (estimate.mode === "charging") return `≈ ${this._formatHours(estimate.hours)} bis ${estimate.targetSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`;
+    if (estimate.mode === "discharging") return `≈ ${this._formatHours(estimate.hours)} bis ${estimate.reserveSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`;
+    return undefined;
   }
 
   private _directConsumersPowerW(): { value?: number; complete: boolean } {
@@ -1059,7 +1305,9 @@ export class AdvancedPowerFlowCard extends LitElement {
             id: `battery-${index}`,
             title: battery.name ?? `Batterie ${index + 1}`,
             main: this._formatPower(battery.power, true),
-            sub: `${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}`,
+            sub: [this._batteryStatus(battery), this._formatSoc(battery.soc), this._batteryEtaNodeText(battery)]
+              .filter(Boolean)
+              .join(" · "),
             entity: battery.power ?? battery.soc,
             kind: "battery",
             x,
@@ -1435,6 +1683,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     const deltaText = delta === undefined
       ? undefined
       : `${delta.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${deltaUnit}`;
+
     const chargeWh = this._energyWh(battery.daily_charge_energy);
     const dischargeWh = this._energyWh(battery.daily_discharge_energy);
     const energyRatio = chargeWh !== undefined && dischargeWh !== undefined && chargeWh > 0
@@ -1443,10 +1692,15 @@ export class AdvancedPowerFlowCard extends LitElement {
     const equivalentCycles = battery.capacity_kwh && battery.capacity_kwh > 0 && chargeWh !== undefined && dischargeWh !== undefined
       ? (chargeWh + dischargeWh) / (2 * battery.capacity_kwh * 1000)
       : undefined;
+
+    const estimate = this._batteryEstimate(battery);
+    const fleet = this._batteryFleetEstimate();
     const warnings = this._batteryWarnings(battery);
+    const batteries = this._config.batteries ?? [];
 
     const detailEntities = [
       battery.power,
+      battery.average_power,
       battery.soc,
       battery.voltage,
       battery.current,
@@ -1461,25 +1715,170 @@ export class AdvancedPowerFlowCard extends LitElement {
       battery.daily_charge_energy,
       battery.daily_discharge_energy
     ];
-    const hasAny = detailEntities.some(Boolean);
+    const hasAny =
+      detailEntities.some(Boolean) ||
+      battery.capacity_kwh !== undefined ||
+      battery.target_soc !== undefined ||
+      battery.reserve_soc !== undefined ||
+      battery.max_charge_power_kw !== undefined ||
+      battery.max_discharge_power_kw !== undefined;
+
+    const estimateLabel = estimate.mode === "charging"
+      ? `Bis Ziel-SOC ${estimate.targetSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`
+      : estimate.mode === "discharging"
+        ? `Bis Reserve-SOC ${estimate.reserveSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`
+        : undefined;
+
+    const fleetModeLabel: Record<BatteryFleetEstimate["mode"], string> = {
+      charging: "Lädt",
+      discharging: "Entlädt",
+      idle: "Ruhe",
+      mixed: "Gemischter Betrieb",
+      unavailable: "Unvollständig"
+    };
+
+    const gridNet = this._gridNetToHouseW();
+    const pvToBatteryEstimate = fleet.mode === "charging" &&
+      (fleet.chargePowerW ?? 0) > this._threshold() &&
+      gridNet !== undefined &&
+      gridNet <= this._threshold()
+        ? fleet.chargePowerW
+        : undefined;
 
     return html`
       <div class="heat-details battery-details">
         <div class="heat-details-head">
           <div>
             <div class="heat-title">▰ ${battery.name ?? `Batterie ${index + 1}`}</div>
-            <div class="heat-subtitle">${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}</div>
+            <div class="heat-subtitle">
+              ${this._batteryStatus(battery)} · ${this._formatSoc(battery.soc)}
+              ${estimate.hours !== undefined ? ` · ${this._formatHours(estimate.hours)}` : ""}
+            </div>
           </div>
           <button @click=${() => { this._expandedBattery = undefined; }}>Schließen</button>
         </div>
+
+        ${batteries.length > 1
+          ? html`
+            <div class="battery-fleet-summary">
+              <div class="battery-fleet-head">
+                <strong>▰ Batterie-Gesamtübersicht</strong>
+                <span>${fleetModeLabel[fleet.mode]}</span>
+              </div>
+              <div class="battery-fleet-grid">
+                ${fleet.soc !== undefined ? this._detailValueItem("Gesamt-SOC", this._formatPercent(fleet.soc), "kapazitätsgewichtet") : nothing}
+                ${fleet.capacityWh !== undefined ? this._detailValueItem("Nutzbare Kapazität gesamt", this._formatEnergyWh(fleet.capacityWh)) : nothing}
+                ${fleet.storedWh !== undefined ? this._detailValueItem("Gespeicherte Energie gesamt", this._formatEnergyWh(fleet.storedWh)) : nothing}
+                ${fleet.chargePowerW !== undefined && fleet.chargePowerW > this._threshold()
+                  ? this._detailValueItem("Ladeleistung gesamt", this._formatW(fleet.chargePowerW, true))
+                  : nothing}
+                ${fleet.dischargePowerW !== undefined && fleet.dischargePowerW > this._threshold()
+                  ? this._detailValueItem("Entladeleistung gesamt", this._formatW(fleet.dischargePowerW, true))
+                  : nothing}
+                ${fleet.energyDeltaWh !== undefined
+                  ? this._detailValueItem(
+                      fleet.mode === "charging" ? "Noch zu laden gesamt" : "Verfügbar bis Reserve gesamt",
+                      this._formatEnergyWh(fleet.energyDeltaWh)
+                    )
+                  : nothing}
+                ${fleet.hours !== undefined
+                  ? this._detailValueItem(
+                      fleet.mode === "charging" ? "Gemeinsame Ladeprognose" : "Gemeinsame Restlaufzeit",
+                      this._formatHours(fleet.hours),
+                      fleet.expectedTime ? `voraussichtlich bis ${fleet.expectedTime}` : undefined
+                    )
+                  : nothing}
+                ${pvToBatteryEstimate !== undefined
+                  ? this._detailValueItem(
+                      "PV-Überschuss → Akkus",
+                      this._formatW(pvToBatteryEstimate, true),
+                      "geschätzt bei fehlendem relevantem Netzbezug"
+                    )
+                  : nothing}
+              </div>
+            </div>
+          `
+          : nothing}
+
         ${warnings.length
           ? html`<div class="detail-warning"><strong>⚠ Diagnose</strong><span>${warnings.join(" · ")}</span></div>`
           : nothing}
+
         ${hasAny
           ? html`
+            ${estimateLabel && estimate.hours !== undefined
+              ? html`
+                <div class="battery-estimate-card">
+                  <div>
+                    <span>${estimate.mode === "charging" ? "Geschätzte Ladedauer" : "Geschätzte Restlaufzeit"}</span>
+                    <strong>${this._formatHours(estimate.hours)}</strong>
+                  </div>
+                  <div>
+                    <span>${estimateLabel}</span>
+                    <strong>${estimate.expectedTime ?? "—"}</strong>
+                    <small>bei ungefähr konstanter Leistung</small>
+                  </div>
+                </div>
+              `
+              : nothing}
+
             <div class="detail-grid">
               ${this._detailItem("Leistung", battery.power)}
+              ${battery.average_power
+                ? this._detailItem("Geglättete Prognoseleistung", battery.average_power)
+                : nothing}
               ${this._detailItem("Ladezustand", battery.soc, "%")}
+              ${battery.capacity_kwh !== undefined
+                ? this._detailValueItem(
+                    "Nutzbare Kapazität",
+                    `${battery.capacity_kwh.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`
+                  )
+                : estimate.capacityWh !== undefined && estimate.capacityInferred
+                  ? this._detailValueItem(
+                      "Kapazität geschätzt",
+                      this._formatEnergyWh(estimate.capacityWh),
+                      "aus Restenergie und SOC abgeleitet"
+                    )
+                  : nothing}
+              ${estimate.currentEnergyWh !== undefined
+                ? this._detailValueItem(
+                    "Aktuell gespeichert",
+                    this._formatEnergyWh(estimate.currentEnergyWh),
+                    battery.remaining_energy ? "aus Restenergie-Sensor" : "aus SOC × Kapazität berechnet"
+                  )
+                : nothing}
+              ${estimate.mode === "charging" && estimate.energyDeltaWh !== undefined
+                ? this._detailValueItem(
+                    `Noch bis ${estimate.targetSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`,
+                    this._formatEnergyWh(estimate.energyDeltaWh)
+                  )
+                : nothing}
+              ${estimate.mode === "discharging" && estimate.energyDeltaWh !== undefined
+                ? this._detailValueItem(
+                    `Verfügbar bis ${estimate.reserveSoc.toLocaleString(undefined, { maximumFractionDigits: 0 })} %`,
+                    this._formatEnergyWh(estimate.energyDeltaWh)
+                  )
+                : nothing}
+              ${estimate.powerW !== undefined && (estimate.mode === "charging" || estimate.mode === "discharging")
+                ? this._detailValueItem(
+                    "Prognoseleistung",
+                    this._formatW(estimate.powerW, true),
+                    estimate.powerSource === "average" ? "geglätteter Leistungssensor" : "momentane Batterieleistung"
+                  )
+                : nothing}
+              ${estimate.loadPercent !== undefined
+                ? this._detailValueItem(
+                    estimate.mode === "charging" ? "Ladeleistung relativ zum Maximum" : "Entladeleistung relativ zum Maximum",
+                    this._formatPercent(estimate.loadPercent)
+                  )
+                : nothing}
+              ${estimate.hours !== undefined
+                ? this._detailValueItem(
+                    estimate.mode === "charging" ? "Geschätzte Ladedauer" : "Geschätzte Restlaufzeit",
+                    this._formatHours(estimate.hours),
+                    estimate.expectedTime ? `Ziel voraussichtlich ${estimate.expectedTime}` : undefined
+                  )
+                : nothing}
               ${this._detailItem("Batteriespannung", battery.voltage, "V")}
               ${this._detailItem("Batteriestrom", battery.current, "A")}
               ${this._detailItem("Temperatur", battery.temperature, "°C")}
@@ -1495,6 +1894,10 @@ export class AdvancedPowerFlowCard extends LitElement {
               ${this._detailItem("Entladeenergie heute", battery.daily_discharge_energy)}
               ${energyRatio !== undefined ? this._detailValueItem("Entladen / Laden heute", `${energyRatio.toLocaleString(undefined, { maximumFractionDigits: 1 })} %`, "Kein echter Wirkungsgrad; SOC-Verschiebung möglich") : nothing}
               ${equivalentCycles !== undefined ? this._detailValueItem("Äquivalente Zyklen heute", equivalentCycles.toLocaleString(undefined, { maximumFractionDigits: 2 }), `bei ${battery.capacity_kwh?.toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh Kapazität`) : nothing}
+            </div>
+            <div class="estimate-note">
+              Prognosen setzen annähernd konstante Lade-/Entladeleistung voraus. BMS-Limits, hoher SOC,
+              wechselnde Verbraucher und PV-Leistung können die tatsächliche Dauer verändern.
             </div>
           `
           : html`<div class="empty-detail">Noch keine Detail-Entities für diese Batterie konfiguriert.</div>`}
@@ -2549,6 +2952,71 @@ export class AdvancedPowerFlowCard extends LitElement {
       border-color: color-mix(in srgb, var(--apfc-battery) 30%, var(--divider-color));
     }
 
+    .battery-fleet-summary {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 32%, var(--divider-color));
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--apfc-battery) 6%, transparent);
+    }
+
+    .battery-fleet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: var(--primary-text-color);
+    }
+
+    .battery-fleet-head span {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--apfc-battery) 13%, transparent);
+      color: var(--secondary-text-color);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .battery-fleet-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+
+    .battery-estimate-card {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 44%, var(--divider-color));
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--apfc-battery) 9%, transparent);
+    }
+
+    .battery-estimate-card > div {
+      display: grid;
+      gap: 3px;
+    }
+
+    .battery-estimate-card span,
+    .battery-estimate-card small,
+    .estimate-note {
+      color: var(--secondary-text-color);
+      font-size: 11px;
+    }
+
+    .battery-estimate-card strong {
+      color: var(--primary-text-color);
+      font-size: 18px;
+    }
+
+    .estimate-note {
+      margin-top: 12px;
+      line-height: 1.45;
+    }
+
     .pv-daily-details {
       border-color: color-mix(in srgb, var(--apfc-solar) 34%, var(--divider-color));
     }
@@ -2822,6 +3290,8 @@ export class AdvancedPowerFlowCard extends LitElement {
       .daily-balance-columns { grid-template-columns: 1fr; }
       .daily-balance-residual { align-items: flex-start; }
       .diagnostic-row { align-items: flex-start; }
+      .battery-estimate-card { grid-template-columns: 1fr; }
+      .battery-fleet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (prefers-reduced-motion: reduce) {
