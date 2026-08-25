@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.7
+
+- Added optional `daily_energy` and `daily_peak_power` entities to every MPPT/sub-PV input.
+- MPPT detail rows now show daily production, daily kWh/kWp, daily share of the parent PV system and optional daily peak power.
+- PV-system daily production can now fall back to the sum of MPPT daily-energy sensors when no parent daily-energy sensor exists.
+- Added optional MPPT daily-underperformance diagnostics based on kWh/kWp.
+- Clicking `Haus heute` now opens a daily energy-balance panel with PV, grid import/export, battery charge/discharge and house consumption.
+- The daily energy-balance panel shows source/use totals and the remaining energy residual when all required sensors are available.
+- Added heat-pump `daily_thermal_energy` and optional `daily_cop`; JAZ is calculated automatically when only electrical and thermal daily energy are configured.
+- Improved drill-down from the `PV heute` system list into the corresponding PV-system detail panel.
+
 ## 0.2.6
 
 - Added automatic daily Autarky and Eigenverbrauch metrics when the required daily energy sensors are configured.

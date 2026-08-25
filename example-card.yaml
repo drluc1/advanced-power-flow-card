@@ -17,16 +17,20 @@ solar:
         power: sensor.goodwe_pv1_power
         voltage: sensor.goodwe_pv1_voltage
         current: sensor.goodwe_pv1_current
+        daily_energy: sensor.goodwe_pv1_energy_today
+        daily_peak_power: sensor.goodwe_pv1_peak_today
         installed_kwp: 1.98
       - name: MPPT 2 Garten
         power: sensor.goodwe_pv2_power
         voltage: sensor.goodwe_pv2_voltage
         current: sensor.goodwe_pv2_current
+        daily_energy: sensor.goodwe_pv2_energy_today
         installed_kwp: 1.98
       - name: MPPT 3 Straße
         power: sensor.goodwe_pv3_power
         voltage: sensor.goodwe_pv3_voltage
         current: sensor.goodwe_pv3_current
+        daily_energy: sensor.goodwe_pv3_energy_today
         installed_kwp: 1.98
 
   - name: Garage
@@ -37,10 +41,12 @@ solar:
         power: sensor.victron_mppt_1_power
         voltage: sensor.victron_mppt_1_voltage
         current: sensor.victron_mppt_1_current
+        daily_energy: sensor.victron_mppt_1_energy_today
       - name: Victron MPPT 2
         power: sensor.victron_mppt_2_power
         voltage: sensor.victron_mppt_2_voltage
         current: sensor.victron_mppt_2_current
+        daily_energy: sensor.victron_mppt_2_energy_today
 
 batteries:
   - name: Akku Garage
@@ -98,3 +104,5 @@ diagnostics:
   battery_temperature_high: 45
   mppt_relative_warning_enabled: false
   mppt_relative_warning_ratio: 0.35
+  mppt_daily_relative_warning_enabled: false
+  mppt_daily_relative_warning_ratio: 0.35

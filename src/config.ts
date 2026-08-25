@@ -86,6 +86,14 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
       mppt_relative_warning_ratio:
         typeof diagnosticsRaw.mppt_relative_warning_ratio === "number"
           ? diagnosticsRaw.mppt_relative_warning_ratio
+          : 0.35,
+      mppt_daily_relative_warning_enabled:
+        typeof diagnosticsRaw.mppt_daily_relative_warning_enabled === "boolean"
+          ? diagnosticsRaw.mppt_daily_relative_warning_enabled
+          : false,
+      mppt_daily_relative_warning_ratio:
+        typeof diagnosticsRaw.mppt_daily_relative_warning_ratio === "number"
+          ? diagnosticsRaw.mppt_daily_relative_warning_ratio
           : 0.35
     },
     colors: raw.colors && typeof raw.colors === "object" ? raw.colors : undefined,
@@ -162,7 +170,9 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
       battery_temperature_low: 5,
       battery_temperature_high: 45,
       mppt_relative_warning_enabled: false,
-      mppt_relative_warning_ratio: 0.35
+      mppt_relative_warning_ratio: 0.35,
+      mppt_daily_relative_warning_enabled: false,
+      mppt_daily_relative_warning_ratio: 0.35
     },
     power_threshold: 5,
     balance_warning_threshold: 50,

@@ -638,7 +638,9 @@ function normalizeConfig(input) {
 			battery_temperature_low: typeof diagnosticsRaw.battery_temperature_low === "number" ? diagnosticsRaw.battery_temperature_low : 5,
 			battery_temperature_high: typeof diagnosticsRaw.battery_temperature_high === "number" ? diagnosticsRaw.battery_temperature_high : 45,
 			mppt_relative_warning_enabled: typeof diagnosticsRaw.mppt_relative_warning_enabled === "boolean" ? diagnosticsRaw.mppt_relative_warning_enabled : false,
-			mppt_relative_warning_ratio: typeof diagnosticsRaw.mppt_relative_warning_ratio === "number" ? diagnosticsRaw.mppt_relative_warning_ratio : .35
+			mppt_relative_warning_ratio: typeof diagnosticsRaw.mppt_relative_warning_ratio === "number" ? diagnosticsRaw.mppt_relative_warning_ratio : .35,
+			mppt_daily_relative_warning_enabled: typeof diagnosticsRaw.mppt_daily_relative_warning_enabled === "boolean" ? diagnosticsRaw.mppt_daily_relative_warning_enabled : false,
+			mppt_daily_relative_warning_ratio: typeof diagnosticsRaw.mppt_daily_relative_warning_ratio === "number" ? diagnosticsRaw.mppt_daily_relative_warning_ratio : .35
 		},
 		colors: raw.colors && typeof raw.colors === "object" ? raw.colors : void 0,
 		power_threshold: typeof raw.power_threshold === "number" && Number.isFinite(raw.power_threshold) ? raw.power_threshold : 5,
@@ -733,7 +735,9 @@ function createStubConfig() {
 			battery_temperature_low: 5,
 			battery_temperature_high: 45,
 			mppt_relative_warning_enabled: false,
-			mppt_relative_warning_ratio: .35
+			mppt_relative_warning_ratio: .35,
+			mppt_daily_relative_warning_enabled: false,
+			mppt_daily_relative_warning_ratio: .35
 		},
 		power_threshold: 5,
 		balance_warning_threshold: 50,
@@ -1009,6 +1013,8 @@ var AdvancedPowerFlowCardEditor = class extends i {
                         ${this._entityPicker("Leistung", input.power, (value) => this._updateMppt(solarIndex, inputIndex, { power: value }))}
                         ${this._entityPicker("Spannung", input.voltage, (value) => this._updateMppt(solarIndex, inputIndex, { voltage: value }))}
                         ${this._entityPicker("Strom", input.current, (value) => this._updateMppt(solarIndex, inputIndex, { current: value }))}
+                        ${this._entityPicker("Tagesproduktion", input.daily_energy, (value) => this._updateMppt(solarIndex, inputIndex, { daily_energy: value }))}
+                        ${this._entityPicker("Peak-Leistung heute", input.daily_peak_power, (value) => this._updateMppt(solarIndex, inputIndex, { daily_peak_power: value }))}
                         ${this._optionalNumberInput("Installierte Leistung [kWp]", input.installed_kwp, "optional", (value) => this._updateMppt(solarIndex, inputIndex, { installed_kwp: value }), { step: .01 })}
                       </div>
                     </div>
@@ -1180,7 +1186,19 @@ var AdvancedPowerFlowCardEditor = class extends i {
 				mppt_relative_warning_ratio: value
 			};
 		}), { step: .05 })}
-            <div class="help">Die MPPT-Abweichungsdiagnose ist standardmäßig aus. Mit kWp-Angaben vergleicht sie W/kWp; ohne kWp nur Rohleistung und kann bei unterschiedlichen Ausrichtungen Fehlalarme erzeugen.</div>
+            ${this._checkbox("MPPT-Tagesertragsdiagnose aktivieren", this._config.diagnostics?.mppt_daily_relative_warning_enabled, false, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				mppt_daily_relative_warning_enabled: value
+			};
+		}))}
+            ${this._numberInput("Tagesertrags-Warnverhältnis", this._config.diagnostics?.mppt_daily_relative_warning_ratio, .35, (value) => this._with((config) => {
+			config.diagnostics = {
+				...config.diagnostics,
+				mppt_daily_relative_warning_ratio: value
+			};
+		}), { step: .05 })}
+            <div class="help">Momentan- und Tagesdiagnose sind standardmäßig aus. Die Tagesdiagnose benötigt Tagesenergie + kWp pro MPPT und vergleicht kWh/kWp. Bei stark unterschiedlichen Ausrichtungen kann trotzdem eine Abweichung normal sein.</div>
           </div>
         </section>
 
@@ -1244,7 +1262,9 @@ var AdvancedPowerFlowCardEditor = class extends i {
             ${this._entityPicker("Kompressorfrequenz", this._config.heat_pump?.compressor_frequency, (value) => this._updateHeatPump({ compressor_frequency: value }))}
             ${this._entityPicker("Thermische Leistung", this._config.heat_pump?.thermal_power, (value) => this._updateHeatPump({ thermal_power: value }))}
             ${this._entityPicker("COP (optional, sonst berechnet)", this._config.heat_pump?.cop, (value) => this._updateHeatPump({ cop: value }))}
-            ${this._entityPicker("Tagesenergie", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
+            ${this._entityPicker("Elektrische Energie heute", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
+            ${this._entityPicker("Thermische Energie heute", this._config.heat_pump?.daily_thermal_energy, (value) => this._updateHeatPump({ daily_thermal_energy: value }))}
+            ${this._entityPicker("Tagesarbeitszahl/JAZ (optional)", this._config.heat_pump?.daily_cop, (value) => this._updateHeatPump({ daily_cop: value }))}
           </div>
         </section>
 
@@ -1367,7 +1387,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.6";
+var CARD_VERSION = "0.2.7";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -1375,6 +1395,7 @@ var AdvancedPowerFlowCard = class extends i {
 		this._heatExpanded = false;
 		this._heatExpansionInitialized = false;
 		this._pvDailyExpanded = false;
+		this._dailyBalanceExpanded = false;
 		this._diagnosticsExpanded = false;
 	}
 	static {
@@ -1385,6 +1406,7 @@ var AdvancedPowerFlowCard = class extends i {
 			_expandedBattery: { state: true },
 			_pvDailyExpanded: { state: true },
 			_expandedPvSystem: { state: true },
+			_dailyBalanceExpanded: { state: true },
 			_diagnosticsExpanded: { state: true },
 			_hoveredNode: { state: true }
 		};
@@ -1416,7 +1438,7 @@ var AdvancedPowerFlowCard = class extends i {
 		};
 	}
 	_detailsOpen() {
-		return this._heatExpanded || this._expandedBattery !== void 0 || this._pvDailyExpanded || this._expandedPvSystem !== void 0 || this._diagnosticsExpanded;
+		return this._heatExpanded || this._expandedBattery !== void 0 || this._pvDailyExpanded || this._expandedPvSystem !== void 0 || this._dailyBalanceExpanded || this._diagnosticsExpanded;
 	}
 	_state(entityId) {
 		if (!entityId || !this.hass) return void 0;
@@ -1660,12 +1682,21 @@ var AdvancedPowerFlowCard = class extends i {
 		if (abs >= 1e3) return `${(value / 1e3).toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh`;
 		return `${value.toLocaleString(void 0, { maximumFractionDigits: 0 })} Wh`;
 	}
+	_pvSystemDailyEnergyWh(system) {
+		const direct = this._energyWh(system.daily_energy);
+		if (direct !== void 0) return direct;
+		const children = system.children ?? [];
+		if (!children.length || children.some((child) => !child.daily_energy)) return void 0;
+		const values = children.map((child) => this._energyWh(child.daily_energy));
+		if (values.some((value) => value === void 0)) return void 0;
+		return values.reduce((sum, value) => sum + value, 0);
+	}
 	_pvDailyTotalWh() {
 		const direct = this._energyWh(this._config.daily?.pv_energy);
 		if (direct !== void 0) return direct;
 		const systems = this._config.solar ?? [];
-		if (!systems.length || systems.some((system) => !system.daily_energy)) return void 0;
-		const values = systems.map((system) => this._energyWh(system.daily_energy));
+		if (!systems.length) return void 0;
+		const values = systems.map((system) => this._pvSystemDailyEnergyWh(system));
 		if (values.some((value) => value === void 0)) return void 0;
 		return values.reduce((sum, value) => sum + value, 0);
 	}
@@ -1699,9 +1730,78 @@ var AdvancedPowerFlowCard = class extends i {
 		};
 	}
 	_specificYield(system) {
-		const energyWh = this._energyWh(system.daily_energy);
+		const energyWh = this._pvSystemDailyEnergyWh(system);
 		if (energyWh === void 0 || !system.installed_kwp || system.installed_kwp <= 0) return void 0;
 		return energyWh / 1e3 / system.installed_kwp;
+	}
+	_mpptSpecificYield(input) {
+		const energyWh = this._energyWh(input.daily_energy);
+		if (energyWh === void 0 || !input.installed_kwp || input.installed_kwp <= 0) return void 0;
+		return energyWh / 1e3 / input.installed_kwp;
+	}
+	_heatPumpDailyCopInfo(hp) {
+		const direct = this._number(hp.daily_cop);
+		if (direct !== void 0) return {
+			value: direct,
+			calculated: false
+		};
+		const thermalWh = this._energyWh(hp.daily_thermal_energy);
+		const electricWh = this._energyWh(hp.daily_energy);
+		if (thermalWh === void 0 || electricWh === void 0 || electricWh <= 0) return { calculated: true };
+		return {
+			value: thermalWh / electricWh,
+			calculated: true
+		};
+	}
+	_batteryDailyEnergy(field) {
+		const batteries = this._config.batteries ?? [];
+		if (!batteries.length) return {
+			value: 0,
+			complete: true
+		};
+		let total = 0;
+		for (const battery of batteries) {
+			const entity = battery[field];
+			if (!entity) return { complete: false };
+			const value = this._energyWh(entity);
+			if (value === void 0) return { complete: false };
+			total += value;
+		}
+		return {
+			value: total,
+			complete: true
+		};
+	}
+	_dailyBalanceInfo() {
+		const pv = this._pvDailyTotalWh();
+		const gridImport = this._energyWh(this._config.daily?.grid_import_energy);
+		const gridExport = this._energyWh(this._config.daily?.grid_export_energy);
+		const house = this._energyWh(this._config.daily?.house_energy);
+		const charge = this._batteryDailyEnergy("daily_charge_energy");
+		const discharge = this._batteryDailyEnergy("daily_discharge_energy");
+		const complete = pv !== void 0 && gridImport !== void 0 && gridExport !== void 0 && house !== void 0 && charge.complete && discharge.complete && charge.value !== void 0 && discharge.value !== void 0;
+		const residual = complete ? pv + gridImport + discharge.value - gridExport - charge.value - house : void 0;
+		return {
+			pv,
+			gridImport,
+			gridExport,
+			batteryCharge: charge.value,
+			batteryDischarge: discharge.value,
+			house,
+			residual,
+			complete
+		};
+	}
+	_hasDailyBalanceData() {
+		const info = this._dailyBalanceInfo();
+		return [
+			info.pv,
+			info.gridImport,
+			info.gridExport,
+			info.batteryCharge,
+			info.batteryDischarge,
+			info.house
+		].some((value) => value !== void 0);
 	}
 	_entityUnavailable(entity) {
 		if (!entity) return false;
@@ -1731,6 +1831,20 @@ var AdvancedPowerFlowCard = class extends i {
 		const ratio = Math.max(0, diag?.mppt_relative_warning_ratio ?? .35);
 		if (median > this._threshold() && own < median * ratio) return allHaveKwp ? "Ertrag pro kWp deutlich unter den anderen MPPTs" : "Leistung deutlich unter den anderen MPPTs";
 	}
+	_mpptDailyDiagnostic(system, input, inputIndex) {
+		const diag = this._config.diagnostics;
+		if (diag?.enabled === false || !(diag?.mppt_daily_relative_warning_enabled ?? false)) return void 0;
+		const children = system.children ?? [];
+		if (children.length < 2) return void 0;
+		const values = children.map((child) => this._mpptSpecificYield(child));
+		if (values.some((value) => value === void 0)) return void 0;
+		const numeric = values;
+		const sorted = [...numeric].sort((a, b) => a - b);
+		const median = sorted.length % 2 ? sorted[Math.floor(sorted.length / 2)] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+		const own = numeric[inputIndex] ?? 0;
+		const ratio = Math.max(0, diag?.mppt_daily_relative_warning_ratio ?? .35);
+		if (median > .05 && own < median * ratio) return "Tagesertrag pro kWp deutlich unter den anderen MPPTs";
+	}
 	_batteryWarnings(battery) {
 		const diag = this._config.diagnostics;
 		if (diag?.enabled === false) return [];
@@ -1757,7 +1871,9 @@ var AdvancedPowerFlowCard = class extends i {
 		if (system.power && this._entityUnavailable(system.power)) warnings.push("Gesamtleistungssensor nicht verfügbar");
 		(system.children ?? []).forEach((input, index) => {
 			const warning = this._mpptDiagnostic(system, input, index);
+			const dailyWarning = this._mpptDailyDiagnostic(system, input, index);
 			if (warning) warnings.push(`${input.name ?? `MPPT ${index + 1}`}: ${warning}`);
+			if (dailyWarning) warnings.push(`${input.name ?? `MPPT ${index + 1}`}: ${dailyWarning}`);
 		});
 		return warnings;
 	}
@@ -1835,7 +1951,8 @@ var AdvancedPowerFlowCard = class extends i {
 				key,
 				label,
 				value: this._formatEnergy(entity),
-				entity
+				entity,
+				expandable: key === "house" && this._hasDailyBalanceData()
 			});
 		}
 		const autarky = this._autarkyPercent();
@@ -2263,6 +2380,7 @@ var AdvancedPowerFlowCard = class extends i {
 				this._expandedBattery = void 0;
 				this._pvDailyExpanded = false;
 				this._expandedPvSystem = void 0;
+				this._dailyBalanceExpanded = false;
 				this._diagnosticsExpanded = false;
 			}
 			return;
@@ -2274,6 +2392,7 @@ var AdvancedPowerFlowCard = class extends i {
 				this._heatExpanded = false;
 				this._pvDailyExpanded = false;
 				this._expandedPvSystem = void 0;
+				this._dailyBalanceExpanded = false;
 				this._diagnosticsExpanded = false;
 			}
 			return;
@@ -2285,6 +2404,7 @@ var AdvancedPowerFlowCard = class extends i {
 				this._heatExpanded = false;
 				this._expandedBattery = void 0;
 				this._pvDailyExpanded = false;
+				this._dailyBalanceExpanded = false;
 				this._diagnosticsExpanded = false;
 			}
 			return;
@@ -2399,7 +2519,7 @@ var AdvancedPowerFlowCard = class extends i {
 	_pvDailyDetails() {
 		const systems = this._config.solar ?? [];
 		const totalWh = this._pvDailyTotalWh();
-		const hasSystemData = systems.some((system) => Boolean(system.daily_energy));
+		const hasSystemData = systems.some((system) => this._pvSystemDailyEnergyWh(system) !== void 0);
 		return b`
       <div class="heat-details pv-daily-details">
         <div class="heat-details-head">
@@ -2418,15 +2538,19 @@ var AdvancedPowerFlowCard = class extends i {
             <div class="detail-grid pv-daily-grid">
               ${systems.map((system, index) => {
 			const entity = system.daily_energy;
-			const valueWh = this._energyWh(entity);
+			const valueWh = this._pvSystemDailyEnergyWh(system);
 			const share = valueWh !== void 0 && totalWh !== void 0 && totalWh > 0 ? Math.min(100, Math.max(0, valueWh / totalWh * 100)) : void 0;
-			const value = entity ? this._formatEnergy(entity) : "Nicht konfiguriert";
+			const value = valueWh !== void 0 ? entity ? this._formatEnergy(entity) : this._formatEnergyWh(valueWh) : "Nicht konfiguriert";
 			const specificYield = this._specificYield(system);
 			const peak = system.daily_peak_power ? this._formatPower(system.daily_peak_power, true) : void 0;
 			return b`
                   <div
-                    class=${`detail-item pv-daily-system ${entity ? "" : "static missing"}`}
-                    @click=${() => entity && this._openMoreInfo(entity)}
+                    class=${`detail-item pv-daily-system ${valueWh !== void 0 ? "" : "static missing"}`}
+                    @click=${() => {
+				if (valueWh === void 0) return;
+				this._expandedPvSystem = index;
+				this._pvDailyExpanded = false;
+			}}
                   >
                     <span>${system.name ?? `PV ${index + 1}`}</span>
                     <strong>${value}</strong>
@@ -2458,6 +2582,80 @@ var AdvancedPowerFlowCard = class extends i {
       </div>
     `;
 	}
+	_dailyEnergyBalanceDetails() {
+		const info = this._dailyBalanceInfo();
+		const supply = info.complete ? (info.pv ?? 0) + (info.gridImport ?? 0) + (info.batteryDischarge ?? 0) : void 0;
+		const usage = info.complete ? (info.house ?? 0) + (info.gridExport ?? 0) + (info.batteryCharge ?? 0) : void 0;
+		const energyCard = (label, value, role) => b`
+      <div class=${`energy-balance-item ${role}`}>
+        <span>${label}</span>
+        <strong>${this._formatEnergyWh(value)}</strong>
+      </div>
+    `;
+		return b`
+      <div class="heat-details daily-balance-details">
+        <div class="heat-details-head">
+          <div>
+            <div class="heat-title">⌂ Energie-Tagesbilanz</div>
+            <div class="heat-subtitle">
+              Erzeugung, Netz, Batterien und Hausverbrauch des heutigen Tages
+            </div>
+          </div>
+          <button @click=${() => {
+			this._dailyBalanceExpanded = false;
+		}}>Schließen</button>
+        </div>
+
+        <div class="daily-balance-columns">
+          <div>
+            <div class="details-section-title">Energiequellen</div>
+            <div class="daily-balance-stack">
+              ${energyCard("PV-Produktion", info.pv, "source")}
+              ${energyCard("Netzbezug", info.gridImport, "source")}
+              ${energyCard("Batterieentladung", info.batteryDischarge, "source")}
+            </div>
+            ${supply !== void 0 ? b`<div class="daily-balance-total"><span>Summe Quellen</span><strong>${this._formatEnergyWh(supply)}</strong></div>` : A}
+          </div>
+
+          <div>
+            <div class="details-section-title">Energieverbrauch / Abgabe</div>
+            <div class="daily-balance-stack">
+              ${energyCard("Hausverbrauch", info.house, "sink")}
+              ${energyCard("Netzeinspeisung", info.gridExport, "sink")}
+              ${energyCard("Batterieladung", info.batteryCharge, "sink")}
+            </div>
+            ${usage !== void 0 ? b`<div class="daily-balance-total"><span>Summe Verwendung</span><strong>${this._formatEnergyWh(usage)}</strong></div>` : A}
+          </div>
+        </div>
+
+        ${info.complete && info.residual !== void 0 ? b`
+            <div class=${`daily-balance-residual ${Math.abs(info.residual) > 100 ? "warning" : "ok"}`}>
+              <div>
+                <strong>${Math.abs(info.residual) > 100 ? "⚠" : "✓"} Bilanzabweichung</strong>
+                <span>Quellen − Verwendung</span>
+              </div>
+              <b>${this._formatEnergyWh(info.residual)}</b>
+            </div>
+          ` : b`
+            <div class="empty-detail">
+              Für eine vollständige Tagesbilanz werden PV, Netzbezug, Einspeisung, Hausverbrauch
+              sowie Lade- und Entladeenergie aller Batterien benötigt.
+            </div>
+          `}
+
+        <div class="detail-note">
+          Die Tagesbilanz zeigt die Energiemengen, aber keine exakte Herkunftszuordnung
+          (z. B. ob eine Batterie aus PV oder Netz geladen wurde).
+        </div>
+
+        ${this._config.daily?.house_energy ? b`
+            <button class="details-entity-button" @click=${() => this._openMoreInfo(this._config.daily.house_energy)}>
+              Haus-Tagesensor öffnen
+            </button>
+          ` : A}
+      </div>
+    `;
+	}
 	_pvSystemDetails(system, index) {
 		const total = this._pvSystemPowerW(system);
 		const pvTotal = this._totalPvW();
@@ -2482,7 +2680,10 @@ var AdvancedPowerFlowCard = class extends i {
 
         <div class="detail-grid system-overview-grid">
           ${this._detailValueItem("Aktuelle Gesamtleistung", this._formatW(total, true))}
-          ${system.daily_energy ? this._detailItem("Produktion heute", system.daily_energy) : A}
+          ${system.daily_energy ? this._detailItem("Produktion heute", system.daily_energy) : (() => {
+			const systemDailyWh = this._pvSystemDailyEnergyWh(system);
+			return systemDailyWh !== void 0 ? this._detailValueItem("Produktion heute", this._formatEnergyWh(systemDailyWh), "Summe der MPPT-Tageswerte") : A;
+		})()}
           ${system.daily_peak_power ? this._detailItem("Peak heute", system.daily_peak_power) : A}
           ${system.installed_kwp ? this._detailValueItem("Installierte Leistung", `${system.installed_kwp.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWp`) : A}
           ${specificYield !== void 0 ? this._detailValueItem("Spezifischer Ertrag heute", `${specificYield.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh/kWp`) : A}
@@ -2497,13 +2698,17 @@ var AdvancedPowerFlowCard = class extends i {
 			const systemPower = Math.abs(total ?? 0);
 			const mpptShare = systemPower > this._threshold() ? this._clampPercent(power / systemPower * 100) : void 0;
 			const normalized = input.installed_kwp && input.installed_kwp > 0 ? power / input.installed_kwp : void 0;
-			const warning = this._mpptDiagnostic(system, input, childIndex);
+			const dailyWh = this._energyWh(input.daily_energy);
+			const systemDailyWh = this._pvSystemDailyEnergyWh(system);
+			const dailyShare = dailyWh !== void 0 && systemDailyWh !== void 0 && systemDailyWh > 0 ? this._clampPercent(dailyWh / systemDailyWh * 100) : void 0;
+			const dailySpecificYield = this._mpptSpecificYield(input);
+			const warnings = [this._mpptDiagnostic(system, input, childIndex), this._mpptDailyDiagnostic(system, input, childIndex)].filter((value) => Boolean(value));
 			return b`
-                  <div class=${`mppt-detail-row ${warning ? "warning" : ""}`}>
+                  <div class=${`mppt-detail-row ${warnings.length ? "warning" : ""}`}>
                     <div class="mppt-detail-head">
                       <div>
                         <strong>${input.name ?? `MPPT ${childIndex + 1}`}</strong>
-                        ${warning ? b`<small>⚠ ${warning}</small>` : b`<small>Keine Auffälligkeit</small>`}
+                        ${warnings.length ? b`<small>⚠ ${warnings.join(" · ")}</small>` : b`<small>Keine Auffälligkeit</small>`}
                       </div>
                       <button ?disabled=${!input.power} @click=${() => input.power && this._openMoreInfo(input.power)}>Entity</button>
                     </div>
@@ -2513,8 +2718,16 @@ var AdvancedPowerFlowCard = class extends i {
                       ${input.current ? b`<span><b>${this._formatMeasurement(input.current, "A")}</b> Strom</span>` : A}
                       ${input.installed_kwp ? b`<span><b>${input.installed_kwp.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWp</b> installiert</span>` : A}
                       ${normalized !== void 0 ? b`<span><b>${normalized.toLocaleString(void 0, { maximumFractionDigits: 0 })} W/kWp</b> aktuell</span>` : A}
+                      ${input.daily_energy ? b`<span><b>${this._formatEnergy(input.daily_energy)}</b> heute</span>` : A}
+                      ${dailySpecificYield !== void 0 ? b`<span><b>${dailySpecificYield.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh/kWp</b> Tagesertrag</span>` : A}
+                      ${dailyShare !== void 0 ? b`<span><b>${this._formatPercent(dailyShare)}</b> Tagesanteil</span>` : A}
+                      ${input.daily_peak_power ? b`<span><b>${this._formatPower(input.daily_peak_power, true)}</b> Peak heute</span>` : A}
                     </div>
                     ${mpptShare !== void 0 ? b`<div class="pv-share-track"><i style=${`width:${mpptShare}%`}></i></div>` : A}
+                    ${dailyShare !== void 0 ? b`<div class="mppt-daily-share">
+                          <span>Tagesanteil</span>
+                          <div class="pv-share-track daily"><i style=${`width:${dailyShare}%`}></i></div>
+                        </div>` : A}
                   </div>
                 `;
 		})}
@@ -2564,7 +2777,9 @@ var AdvancedPowerFlowCard = class extends i {
 			hp.compressor_frequency,
 			hp.thermal_power,
 			hp.cop,
-			hp.daily_energy
+			hp.daily_energy,
+			hp.daily_thermal_energy,
+			hp.daily_cop
 		].some(Boolean);
 		return b`
       <div class="heat-details">
@@ -2593,7 +2808,12 @@ var AdvancedPowerFlowCard = class extends i {
 			const cop = this._heatPumpCopInfo(hp);
 			return cop.value !== void 0 ? this._detailValueItem("COP", cop.value.toLocaleString(void 0, { maximumFractionDigits: 2 }), "aus thermischer / elektrischer Leistung berechnet") : A;
 		})()}
-              ${this._detailItem("Tagesenergie", hp.daily_energy)}
+              ${this._detailItem("Elektrische Energie heute", hp.daily_energy)}
+              ${this._detailItem("Thermische Energie heute", hp.daily_thermal_energy)}
+              ${hp.daily_cop ? this._detailItem("Tagesarbeitszahl (JAZ)", hp.daily_cop) : (() => {
+			const dailyCop = this._heatPumpDailyCopInfo(hp);
+			return dailyCop.value !== void 0 ? this._detailValueItem("Tagesarbeitszahl (JAZ)", dailyCop.value.toLocaleString(void 0, { maximumFractionDigits: 2 }), "aus thermischer / elektrischer Tagesenergie berechnet") : A;
+		})()}
             </div>
           ` : b`<div class="empty-detail">Noch keine Detail-Entities für die Wärmepumpe konfiguriert.</div>`}
       </div>
@@ -2653,6 +2873,19 @@ var AdvancedPowerFlowCard = class extends i {
 					this._heatExpanded = false;
 					this._expandedBattery = void 0;
 					this._expandedPvSystem = void 0;
+					this._dailyBalanceExpanded = false;
+					this._diagnosticsExpanded = false;
+				}
+				return;
+			}
+			if (item.key === "house" && item.expandable) {
+				const next = !this._dailyBalanceExpanded;
+				this._dailyBalanceExpanded = next;
+				if (next) {
+					this._heatExpanded = false;
+					this._expandedBattery = void 0;
+					this._expandedPvSystem = void 0;
+					this._pvDailyExpanded = false;
 					this._diagnosticsExpanded = false;
 				}
 				return;
@@ -2662,7 +2895,7 @@ var AdvancedPowerFlowCard = class extends i {
                 >
                   <span class="daily-item-label">
                     ${item.label}
-                    ${item.expandable ? b`<b>${this._pvDailyExpanded ? "▲" : "▼"}</b>` : A}
+                    ${item.expandable ? b`<b>${item.key === "pv" ? this._pvDailyExpanded ? "▲" : "▼" : this._dailyBalanceExpanded ? "▲" : "▼"}</b>` : A}
                   </span>
                   <strong>${item.value}</strong>
                 </button>
@@ -2738,11 +2971,12 @@ var AdvancedPowerFlowCard = class extends i {
 				this._expandedBattery = void 0;
 				this._pvDailyExpanded = false;
 				this._expandedPvSystem = void 0;
+				this._dailyBalanceExpanded = false;
 			}
 		}}>⚠ ${diagnostics.length} Hinweis${diagnostics.length === 1 ? "" : "e"}</button>` : A}
         </div>
 
-        ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : this._expandedBattery !== void 0 && this._config.batteries?.[this._expandedBattery] ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery) : this._expandedPvSystem !== void 0 && this._config.solar?.[this._expandedPvSystem] ? this._pvSystemDetails(this._config.solar[this._expandedPvSystem], this._expandedPvSystem) : this._pvDailyExpanded ? this._pvDailyDetails() : this._diagnosticsExpanded && diagnostics.length ? this._diagnosticsDetails(diagnostics) : A}
+        ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : this._expandedBattery !== void 0 && this._config.batteries?.[this._expandedBattery] ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery) : this._expandedPvSystem !== void 0 && this._config.solar?.[this._expandedPvSystem] ? this._pvSystemDetails(this._config.solar[this._expandedPvSystem], this._expandedPvSystem) : this._pvDailyExpanded ? this._pvDailyDetails() : this._dailyBalanceExpanded ? this._dailyEnergyBalanceDetails() : this._diagnosticsExpanded && diagnostics.length ? this._diagnosticsDetails(diagnostics) : A}
       </ha-card>
     `;
 	}
@@ -3352,6 +3586,111 @@ var AdvancedPowerFlowCard = class extends i {
       font-size: 10px;
     }
 
+    .mppt-daily-share {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      color: var(--secondary-text-color);
+      font-size: 10px;
+    }
+
+    .pv-share-track.daily {
+      margin-top: 0;
+      height: 3px;
+    }
+
+    .daily-balance-details {
+      border-color: color-mix(in srgb, var(--apfc-consumer) 30%, var(--divider-color));
+    }
+
+    .daily-balance-columns {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .daily-balance-stack {
+      display: grid;
+      gap: 7px;
+    }
+
+    .energy-balance-item,
+    .daily-balance-total {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--divider-color);
+      border-radius: 10px;
+      background: var(--card-background-color);
+    }
+
+    .energy-balance-item span,
+    .daily-balance-total span {
+      color: var(--secondary-text-color);
+      font-size: 11px;
+    }
+
+    .energy-balance-item strong,
+    .daily-balance-total strong {
+      color: var(--primary-text-color);
+      font-size: 13px;
+    }
+
+    .energy-balance-item.source {
+      border-left: 3px solid color-mix(in srgb, var(--apfc-solar) 72%, var(--apfc-grid));
+    }
+
+    .energy-balance-item.sink {
+      border-left: 3px solid color-mix(in srgb, var(--apfc-consumer) 72%, var(--apfc-battery));
+    }
+
+    .daily-balance-total {
+      margin-top: 8px;
+      background: color-mix(in srgb, var(--secondary-background-color) 55%, transparent);
+      font-weight: 700;
+    }
+
+    .daily-balance-residual {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--divider-color);
+    }
+
+    .daily-balance-residual > div {
+      display: grid;
+      gap: 2px;
+    }
+
+    .daily-balance-residual span,
+    .detail-note {
+      color: var(--secondary-text-color);
+      font-size: 11px;
+    }
+
+    .daily-balance-residual.ok {
+      border-color: color-mix(in srgb, var(--apfc-battery) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-battery) 6%, transparent);
+    }
+
+    .daily-balance-residual.warning {
+      border-color: color-mix(in srgb, var(--error-color, #db4437) 45%, var(--divider-color));
+      background: color-mix(in srgb, var(--error-color, #db4437) 7%, transparent);
+    }
+
+    .detail-note {
+      margin-top: 10px;
+      line-height: 1.45;
+    }
+
     .diagnostic-list { display: grid; gap: 8px; }
     .diagnostic-row {
       display: flex;
@@ -3393,6 +3732,8 @@ var AdvancedPowerFlowCard = class extends i {
       }
       .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
       .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
+      .daily-balance-columns { grid-template-columns: 1fr; }
+      .daily-balance-residual { align-items: flex-start; }
       .diagnostic-row { align-items: flex-start; }
     }
 

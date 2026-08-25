@@ -249,6 +249,8 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
                         ${this._entityPicker("Leistung", input.power, (value) => this._updateMppt(solarIndex, inputIndex, { power: value }))}
                         ${this._entityPicker("Spannung", input.voltage, (value) => this._updateMppt(solarIndex, inputIndex, { voltage: value }))}
                         ${this._entityPicker("Strom", input.current, (value) => this._updateMppt(solarIndex, inputIndex, { current: value }))}
+                        ${this._entityPicker("Tagesproduktion", input.daily_energy, (value) => this._updateMppt(solarIndex, inputIndex, { daily_energy: value }))}
+                        ${this._entityPicker("Peak-Leistung heute", input.daily_peak_power, (value) => this._updateMppt(solarIndex, inputIndex, { daily_peak_power: value }))}
                         ${this._optionalNumberInput("Installierte Leistung [kWp]", input.installed_kwp, "optional", (value) => this._updateMppt(solarIndex, inputIndex, { installed_kwp: value }), { step: 0.01 })}
                       </div>
                     </div>
@@ -337,7 +339,9 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             ${this._numberInput("Batterietemperatur Maximum [°C]", this._config.diagnostics?.battery_temperature_high, 45, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, battery_temperature_high: value }; }))}
             ${this._checkbox("MPPT-Abweichungsdiagnose aktivieren", this._config.diagnostics?.mppt_relative_warning_enabled, false, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_relative_warning_enabled: value }; }))}
             ${this._numberInput("MPPT-Warnverhältnis", this._config.diagnostics?.mppt_relative_warning_ratio, 0.35, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_relative_warning_ratio: value }; }), { step: 0.05 })}
-            <div class="help">Die MPPT-Abweichungsdiagnose ist standardmäßig aus. Mit kWp-Angaben vergleicht sie W/kWp; ohne kWp nur Rohleistung und kann bei unterschiedlichen Ausrichtungen Fehlalarme erzeugen.</div>
+            ${this._checkbox("MPPT-Tagesertragsdiagnose aktivieren", this._config.diagnostics?.mppt_daily_relative_warning_enabled, false, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_daily_relative_warning_enabled: value }; }))}
+            ${this._numberInput("Tagesertrags-Warnverhältnis", this._config.diagnostics?.mppt_daily_relative_warning_ratio, 0.35, (value) => this._with((config) => { config.diagnostics = { ...config.diagnostics, mppt_daily_relative_warning_ratio: value }; }), { step: 0.05 })}
+            <div class="help">Momentan- und Tagesdiagnose sind standardmäßig aus. Die Tagesdiagnose benötigt Tagesenergie + kWp pro MPPT und vergleicht kWh/kWp. Bei stark unterschiedlichen Ausrichtungen kann trotzdem eine Abweichung normal sein.</div>
           </div>
         </section>
 
@@ -371,7 +375,9 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             ${this._entityPicker("Kompressorfrequenz", this._config.heat_pump?.compressor_frequency, (value) => this._updateHeatPump({ compressor_frequency: value }))}
             ${this._entityPicker("Thermische Leistung", this._config.heat_pump?.thermal_power, (value) => this._updateHeatPump({ thermal_power: value }))}
             ${this._entityPicker("COP (optional, sonst berechnet)", this._config.heat_pump?.cop, (value) => this._updateHeatPump({ cop: value }))}
-            ${this._entityPicker("Tagesenergie", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
+            ${this._entityPicker("Elektrische Energie heute", this._config.heat_pump?.daily_energy, (value) => this._updateHeatPump({ daily_energy: value }))}
+            ${this._entityPicker("Thermische Energie heute", this._config.heat_pump?.daily_thermal_energy, (value) => this._updateHeatPump({ daily_thermal_energy: value }))}
+            ${this._entityPicker("Tagesarbeitszahl/JAZ (optional)", this._config.heat_pump?.daily_cop, (value) => this._updateHeatPump({ daily_cop: value }))}
           </div>
         </section>
 

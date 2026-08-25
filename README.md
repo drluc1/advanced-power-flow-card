@@ -2,18 +2,17 @@
 
 Flexible Home Assistant Lovelace power-flow card with dynamic PV systems, MPPTs, batteries, grid, house load, heat pump and additional consumers.
 
-## v0.2.6 highlights
+## v0.2.7 highlights
 
 - Unlimited PV systems and MPPT/sub-PV inputs.
-- Click a PV-system total node for a detailed live MPPT breakdown.
-- Optional PV `installed_kwp`, daily peak power and specific yield in kWh/kWp.
+- MPPTs can now have their own daily-energy and daily-peak entities.
+- Automatic MPPT specific daily yield in kWh/kWp and daily share of the parent PV system.
+- Optional daily MPPT underperformance diagnostics based on kWh/kWp.
+- Click a PV-system total node for live and daily MPPT analytics.
+- Clicking `Haus heute` opens a daily energy balance for PV, grid, batteries and house consumption.
+- Heat-pump daily performance factor/JAZ can be read directly or calculated from thermal/electrical daily energy.
 - Automatic Autarky and Eigenverbrauch daily metrics.
-- PV, battery, balance and sensor-availability diagnostics.
-- Optional normalized MPPT comparison in W/kWp.
 - Battery detail panels with cell voltages, temperature, SOH, cycles and daily energy.
-- Heat-pump COP can be calculated automatically from thermal/electrical power.
-- Optional compact daily-summary layout and night mode.
-- Optional category/flow color overrides.
 - Automatic house consumption calculation when no house-power entity is configured.
 
 ## Build
@@ -43,22 +42,26 @@ solar:
         power: sensor.goodwe_pv1_power
         voltage: sensor.goodwe_pv1_voltage
         current: sensor.goodwe_pv1_current
+        daily_energy: sensor.goodwe_pv1_energy_today
+        daily_peak_power: sensor.goodwe_pv1_peak_today
         installed_kwp: 1.98
       - name: MPPT 2 Garten
         power: sensor.goodwe_pv2_power
         voltage: sensor.goodwe_pv2_voltage
         current: sensor.goodwe_pv2_current
+        daily_energy: sensor.goodwe_pv2_energy_today
         installed_kwp: 1.98
       - name: MPPT 3 Straße
         power: sensor.goodwe_pv3_power
         voltage: sensor.goodwe_pv3_voltage
         current: sensor.goodwe_pv3_current
+        daily_energy: sensor.goodwe_pv3_energy_today
         installed_kwp: 1.98
 ```
 
 `power` on the parent PV system is optional. If omitted, the card sums its MPPT powers.
 
-Clicking the parent PV node opens live MPPT details. Clicking `PV heute` opens the daily production breakdown. When `installed_kwp` is configured, the card calculates specific daily yield in kWh/kWp. `daily_peak_power` is optional.
+Clicking the parent PV node opens live and daily MPPT details. Each MPPT can have `daily_energy`, `daily_peak_power` and `installed_kwp`; the card then calculates kWh/kWp and the MPPT share of the parent system. If a PV system has no own `daily_energy`, the card can sum all configured MPPT daily-energy entities instead.
 
 ## Daily metrics
 
@@ -96,6 +99,8 @@ diagnostics:
   battery_temperature_high: 45
   mppt_relative_warning_enabled: false
   mppt_relative_warning_ratio: 0.35
+  mppt_daily_relative_warning_enabled: false
+  mppt_daily_relative_warning_ratio: 0.35
 ```
 
 The card can flag:
@@ -107,7 +112,7 @@ The card can flag:
 - Power-balance residuals when a measured house-power entity is configured.
 - Optional relative MPPT underperformance.
 
-Relative MPPT diagnostics are **off by default** because different orientations/shading can make raw MPPT comparisons misleading. When `installed_kwp` is set on all MPPTs, the comparison uses W/kWp instead of raw watts.
+Relative MPPT diagnostics are **off by default** because different orientations/shading can make comparisons misleading. Live comparison uses W/kWp when possible. Daily comparison requires `daily_energy` and `installed_kwp` on all MPPTs and compares kWh/kWp.
 
 ## Batteries
 
@@ -146,11 +151,24 @@ heat_pump:
   return_temperature: sensor.heatpump_return_temperature
   outdoor_temperature: sensor.heatpump_outdoor_temperature
   mode: sensor.heatpump_mode
-  daily_energy: sensor.heatpump_daily_energy
+  daily_energy: sensor.heatpump_electric_energy_today
+  daily_thermal_energy: sensor.heatpump_thermal_energy_today
+  daily_cop: sensor.heatpump_jaz_today   # optional
   part_of_house: true
 ```
 
-If `cop` is omitted but both electrical and thermal power are available, the card calculates the live COP automatically.
+If `cop` is omitted but both electrical and thermal power are available, the card calculates the live COP automatically. If `daily_cop` is omitted but electrical and thermal daily-energy sensors are available, the card calculates the daily performance factor/JAZ automatically.
+
+## Daily energy balance
+
+When `house_energy`, grid import/export and the daily charge/discharge energy of all configured batteries are available, clicking `Haus heute` opens a full daily energy balance:
+
+```text
+Sources: PV + grid import + battery discharge
+Uses:    house + grid export + battery charge
+```
+
+The panel also shows the residual between both sides. It deliberately does not claim exact source-to-destination attribution (for example whether a battery was charged from PV or grid).
 
 ## House power
 

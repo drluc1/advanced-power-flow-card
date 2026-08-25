@@ -13,6 +13,8 @@ export interface PvInputConfig {
   power?: string;
   voltage?: string;
   current?: string;
+  daily_energy?: string;
+  daily_peak_power?: string;
   installed_kwp?: number;
 }
 
@@ -71,6 +73,8 @@ export interface DiagnosticsConfig {
   battery_temperature_high?: number;
   mppt_relative_warning_enabled?: boolean;
   mppt_relative_warning_ratio?: number;
+  mppt_daily_relative_warning_enabled?: boolean;
+  mppt_daily_relative_warning_ratio?: number;
 }
 
 export interface CardColorsConfig {
@@ -98,6 +102,8 @@ export interface HeatPumpConfig extends ConsumerConfig {
   thermal_power?: string;
   cop?: string;
   daily_energy?: string;
+  daily_thermal_energy?: string;
+  daily_cop?: string;
   details_expanded_by_default?: boolean;
 }
 
