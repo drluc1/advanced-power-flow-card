@@ -205,11 +205,18 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             { value: "comfortable", label: "Großzügig" }
           ], (value) => this._with((config) => { config.layout_density = value as "auto" | "compact" | "comfortable"; }))}
           ${this._selectInput("PV-Darstellung", this._config.pv_layout, [
-            { value: "auto", label: "Automatisch (bei vielen Anlagen kompakt)" },
-            { value: "expanded", label: "Immer vollständig mit MPPTs" },
-            { value: "compact", label: "Kompakt – nur PV-Gesamtsysteme" }
-          ], (value) => this._with((config) => { config.pv_layout = value as "auto" | "expanded" | "compact"; }))}
-          <div class="help">Im kompakten PV-Modus bleiben die MPPTs im Hauptdiagramm ausgeblendet. Ein Klick auf das PV-Gesamtsystem öffnet weiterhin die vollständige MPPT-Detailansicht.</div>
+            { value: "auto", label: "Automatisch – mehrere Anlagen gruppieren" },
+            { value: "grouped", label: "Gruppiert – eine gemeinsame PV-Kachel" },
+            { value: "expanded", label: "Getrennt – klassische Darstellung" },
+            { value: "compact", label: "Getrennt kompakt" }
+          ], (value) => this._with((config) => { config.pv_layout = value as "auto" | "expanded" | "compact" | "grouped"; }))}
+          ${this._selectInput("PV-Detailstufe im Hauptdiagramm", this._config.pv_detail_level, [
+            { value: "auto", label: "Automatisch" },
+            { value: "minimal", label: "Minimal – nur Gesamtleistung" },
+            { value: "compact", label: "Kompakt – MPPT-Leistungen als Zeilen" },
+            { value: "full", label: "Vollständig – einzelne MPPT-Kacheln" }
+          ], (value) => this._with((config) => { config.pv_detail_level = value as "auto" | "minimal" | "compact" | "full"; }))}
+          <div class="help">„Gruppiert + Kompakt“ fasst alle PV-Anlagen in einer gemeinsamen Kachel zusammen und zeigt die MPPT-Leistungen platzsparend direkt unter der jeweiligen Anlagenleistung. Ein Klick auf ein PV-System öffnet weiterhin die vollständige Detailansicht.</div>
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },

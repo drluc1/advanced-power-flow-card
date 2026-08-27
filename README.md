@@ -299,3 +299,14 @@ colors:
   consumer: "#03a9f4"
   flow: "#03a9f4"
 ```
+
+### Gruppierte PV-Darstellung
+
+Ab v0.3.2 können mehrere PV-Systeme in einer gemeinsamen Kachel dargestellt werden:
+
+```yaml
+pv_layout: grouped
+pv_detail_level: compact
+```
+
+`pv_detail_level` unterstützt `minimal`, `compact`, `full` und `auto`. In `compact` werden die MPPT-Leistungen platzsparend direkt im jeweiligen PV-Gesamtknoten angezeigt; ein Klick öffnet weiterhin die vollständige Detailansicht.

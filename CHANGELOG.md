@@ -1,3 +1,13 @@
+## 0.3.2
+
+- Neue gruppierte PV-Darstellung: alle PV-Systeme können in einer gemeinsamen Kachel erscheinen.
+- Neue `pv_detail_level`-Option mit `minimal`, `compact`, `full` und `auto`.
+- Kompakte PV-Ansicht kann MPPT-Leistungen direkt unter der Gesamtleistung anzeigen.
+- Im automatischen Modus werden mehrere PV-Systeme standardmäßig gruppiert.
+- Gruppierte PV-Systeme nutzen nur noch eine gemeinsame Energiefluss-Verbindung zur Versorgung.
+- Speicher und hausbezogene Verbraucher werden im unteren Diagrammbereich getrennt angeordnet.
+- Batterie- und Verbraucherleitungen nutzen getrennte seitliche Busse und kreuzen dadurch deutlich seltener andere Nodes.
+
 ## 0.3.1
 
 - Fixed empty placeholder space above PV-system totals when a PV system has no configured MPPT/sub-PV inputs.

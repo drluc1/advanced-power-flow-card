@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.3.2";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -24,6 +24,7 @@ interface DiagramNode {
   title: string;
   main: string;
   sub?: string;
+  sub2?: string;
   entity?: string;
   kind: NodeKind;
   x: number;
@@ -94,6 +95,13 @@ interface BatteryFleetEstimate {
   energyDeltaWh?: number;
 }
 
+interface PvGroupLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface LayoutResult {
   width: number;
   height: number;
@@ -101,6 +109,7 @@ interface LayoutResult {
   grid: DiagramNode;
   house: DiagramNode;
   pvClusters: PvClusterLayout[];
+  pvGroup?: PvGroupLayout;
   bottom: BottomNode[];
 }
 
@@ -1221,51 +1230,95 @@ export class AdvancedPowerFlowCard extends LitElement {
     return `${value.slice(0, max - 1)}…`;
   }
 
-  private _compactPvLayout(): boolean {
+  private _groupedPvLayout(): boolean {
     const mode = this._config.pv_layout ?? "auto";
-    if (mode === "compact") return true;
-    if (mode === "expanded") return false;
+    if (mode === "grouped") return true;
+    if (mode === "expanded" || mode === "compact") return false;
+    return (this._config.solar ?? []).length >= 2;
+  }
 
-    const systems = this._config.solar ?? [];
-    // Automatic mode becomes compact only when the PV section would otherwise
-    // dominate the card. Manual "expanded" always wins.
-    return systems.length >= 4;
+  private _resolvedPvDetailLevel(): "minimal" | "compact" | "full" {
+    const configured = this._config.pv_detail_level ?? "auto";
+    if (configured !== "auto") return configured;
+
+    const layout = this._config.pv_layout ?? "auto";
+    if (layout === "expanded") return "full";
+    if (layout === "compact") return "minimal";
+    return this._groupedPvLayout() ? "compact" : "full";
+  }
+
+  private _compactPvLayout(): boolean {
+    return this._resolvedPvDetailLevel() !== "full";
+  }
+
+  private _compactMpptLines(system: PvSystemConfig): string[] {
+    const children = system.children ?? [];
+    if (!children.length) return [];
+
+    const entries = children.map((child, index) => {
+      const name = this._short(child.name ?? `MPPT ${index + 1}`, 13);
+      return `${name} ${this._formatPower(child.power, true)}`;
+    });
+
+    if (entries.length <= 2) return [entries.join(" · ")];
+    const first = entries.slice(0, 2).join(" · ");
+    let second = entries.slice(2, 4).join(" · ");
+    if (entries.length > 4) second += ` · +${entries.length - 4}`;
+    return [first, second];
   }
 
   private _layout(): LayoutResult {
     const solar = this._config.solar ?? [];
     const batteries = this._config.batteries ?? [];
     const consumers = this._config.consumers ?? [];
-    const compactPv = this._compactPvLayout();
+    const groupedPv = this._groupedPvLayout();
+    const pvDetail = this._resolvedPvDetailLevel();
+    const showPvChildren = pvDetail === "full";
+    const showCompactMppts = pvDetail === "compact";
 
-    // Fixed logical width: the SVG scales to the available card width. The
-    // diagram grows vertically, never horizontally, so mobile stays overviewable.
     const width = 1000;
     const density = this._config.layout_density ?? "auto";
     const densityFactor = density === "compact" ? 0.84 : density === "comfortable" ? 1.14 : 1;
     const sizeFactor = this._config.text_size === "xlarge" ? 1.08 : 1;
     const sideMargin = 28 * densityFactor;
-    const pvGapX = (compactPv ? 12 : 20) * densityFactor;
-    const pvGapY = (compactPv ? 12 : 20) * densityFactor;
-    const pvColumns = compactPv
-      ? (solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2)
-      : (solar.length <= 1 ? 1 : 2);
+
+    const groupX = 26;
+    const groupY = 18;
+    const groupW = width - 52;
+    const groupHeaderH = 34;
+    const groupInnerPad = 14 * densityFactor;
+    const pvGapX = (groupedPv ? 14 : 20) * densityFactor;
+    const pvGapY = (groupedPv ? 13 : 20) * densityFactor;
+
+    let pvColumns: number;
+    if (groupedPv) {
+      if (pvDetail === "minimal") pvColumns = Math.min(3, Math.max(1, solar.length));
+      else pvColumns = solar.length <= 1 ? 1 : 2;
+    } else {
+      const legacyCompact = (this._config.pv_layout ?? "auto") === "compact";
+      pvColumns = legacyCompact
+        ? (solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2)
+        : (solar.length <= 1 ? 1 : 2);
+    }
+
+    const availablePvWidth = groupedPv ? groupW - groupInnerPad * 2 : width - sideMargin * 2;
     const clusterWidth = pvColumns === 1
-      ? 620
-      : (width - sideMargin * 2 - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
+      ? Math.min(groupedPv ? availablePvWidth : 620, availablePvWidth)
+      : (availablePvWidth - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
 
     const childGapX = 12 * densityFactor;
     const childGapY = 10 * densityFactor;
     const childH = 78 * sizeFactor;
-    const parentMaxW = compactPv
-      ? Math.min(300, clusterWidth - 20)
-      : (this._config.text_size === "xlarge" ? 450 : 430);
-    const parentH = (compactPv ? 80 : 86) * sizeFactor;
-    const clusterPadX = (compactPv ? 10 : 18) * densityFactor;
-    const clusterPadY = (compactPv ? 10 : 18) * densityFactor;
+    const clusterPadX = (groupedPv ? 8 : 18) * densityFactor;
+    const clusterPadY = (groupedPv ? 8 : 18) * densityFactor;
+    const compactTwoLines = showCompactMppts && solar.some((system) => this._compactMpptLines(system).length > 1);
+    const parentBaseH = showCompactMppts ? (compactTwoLines ? 112 : 98) : 86;
+    const parentH = parentBaseH * sizeFactor;
+    const parentMaxW = groupedPv ? clusterWidth - clusterPadX * 2 : (this._config.text_size === "xlarge" ? 450 : 430);
 
     const pvClusters: PvClusterLayout[] = [];
-    let pvY = 18;
+    let pvY = groupedPv ? groupY + groupHeaderH : 18;
+    let pvBottom = pvY;
 
     for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
       const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
@@ -1275,28 +1328,21 @@ export class AdvancedPowerFlowCard extends LitElement {
         const systemIndex = rowStart + localIndex;
         const rowCount = rowSystems.length;
         const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
-        const rowStartX = (width - rowWidth) / 2;
+        const rowStartX = groupedPv ? groupX + (groupW - rowWidth) / 2 : (width - rowWidth) / 2;
         const clusterX = rowStartX + localIndex * (clusterWidth + pvGapX);
 
-        // In compact mode the MPPTs stay available in the detail panel, but do
-        // not consume any space in the main diagram.
-        const children = compactPv ? [] : (system.children ?? []);
+        const children = showPvChildren ? (system.children ?? []) : [];
         const childColumns = Math.min(2, Math.max(1, children.length));
         const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
-        const childrenAreaH = childRows
-          ? childRows * childH + Math.max(0, childRows - 1) * childGapY
-          : 0;
+        const childrenAreaH = childRows ? childRows * childH + Math.max(0, childRows - 1) * childGapY : 0;
         const childParentGap = children.length ? 14 * densityFactor : 0;
         const clusterHeight = clusterPadY + childrenAreaH + childParentGap + parentH + clusterPadY;
-
         const childW = childColumns === 1
           ? Math.min(220, clusterWidth - clusterPadX * 2)
           : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
 
         const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
         const parentX = clusterX + clusterWidth / 2 - parentW / 2;
-        // Important: with zero MPPTs the parent sits directly at the top of its
-        // cluster. This removes the old empty placeholder area.
         const parentY = pvY + clusterPadY + childrenAreaH + childParentGap;
         const parentPower = this._pvSystemPowerW(system);
         const systemWarnings = this._pvSystemWarnings(system);
@@ -1305,14 +1351,16 @@ export class AdvancedPowerFlowCard extends LitElement {
           ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100)
           : undefined;
         const configuredChildren = system.children?.length ?? 0;
+        const mpptLines = showCompactMppts ? this._compactMpptLines(system) : [];
 
         const parent: DiagramNode = {
           id: `pv-system-${systemIndex}`,
           title: system.name ?? `PV ${systemIndex + 1}`,
           main: this._formatW(parentPower, true),
-          sub: configuredChildren
-            ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}`
-            : "PV-System",
+          sub: showCompactMppts && mpptLines.length
+            ? mpptLines[0]
+            : configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
+          sub2: showCompactMppts ? mpptLines[1] : undefined,
           entity: system.power,
           kind: "pv-parent",
           x: parentX,
@@ -1332,7 +1380,6 @@ export class AdvancedPowerFlowCard extends LitElement {
           const itemsInThisRow = Math.min(childColumns, children.length - row * childColumns);
           const usedWidth = itemsInThisRow * childW + Math.max(0, itemsInThisRow - 1) * childGapX;
           const childRowStartX = clusterX + (clusterWidth - usedWidth) / 2;
-
           return {
             id: `pv-${systemIndex}-${childIndex}`,
             title: child.name ?? `MPPT ${childIndex + 1}`,
@@ -1349,205 +1396,133 @@ export class AdvancedPowerFlowCard extends LitElement {
           };
         });
 
-        rowLayouts.push({
-          system,
-          systemIndex,
-          x: clusterX,
-          y: pvY,
-          width: clusterWidth,
-          height: clusterHeight,
-          parent,
-          children: childNodes
-        });
+        rowLayouts.push({ system, systemIndex, x: clusterX, y: pvY, width: clusterWidth, height: clusterHeight, parent, children: childNodes });
       });
 
       pvClusters.push(...rowLayouts);
       const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
+      pvBottom = pvY + rowHeight;
       pvY += rowHeight + pvGapY;
     }
 
-    if (!solar.length) pvY = 24;
+    let pvGroup: PvGroupLayout | undefined;
+    if (groupedPv && solar.length) {
+      pvGroup = { x: groupX, y: groupY, width: groupW, height: Math.max(92, pvBottom - groupY + 12) };
+      pvBottom = pvGroup.y + pvGroup.height;
+    } else if (!solar.length) {
+      pvBottom = 24;
+    }
 
-    const centerY = pvY + 34;
+    const centerY = pvBottom + 34;
     const balance = this._systemBalanceInfo();
     const center: DiagramNode = {
-      id: "center",
-      title: "Versorgung",
+      id: "center", title: "Versorgung",
       main: balance.complete ? this._formatW(balance.source, true) : "—",
-      sub: balance.complete
-        ? (balance.calculatedHouse
-          ? "Haus aus Leistungsbilanz"
-          : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}`)
-        : "Bilanz unvollständig",
-      kind: "center",
-      x: width / 2 - 100,
-      y: centerY,
-      w: 200,
-      h: 92 * sizeFactor,
-      activity: balance.complete ? this._activityFromPower(balance.source) : "unknown",
-      warning: balance.warning
+      sub: balance.complete ? (balance.calculatedHouse ? "Haus aus Leistungsbilanz" : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}`) : "Bilanz unvollständig",
+      kind: "center", x: width / 2 - 100, y: centerY, w: 200, h: 92 * sizeFactor,
+      activity: balance.complete ? this._activityFromPower(balance.source) : "unknown", warning: balance.warning
     };
 
     const grid: DiagramNode = {
-      id: "grid",
-      title: "Netz",
-      main: this._formatPower(this._config.grid?.power, true),
-      sub: this._gridFlow() === "forward"
-        ? "Energie aus Netz"
-        : this._gridFlow() === "reverse"
-          ? "Energie ins Netz"
-          : "Kein Netzfluss",
-      entity: this._config.grid?.power,
-      kind: "grid",
-      x: 50,
-      y: centerY + 2,
-      w: 190,
-      h: 88 * sizeFactor,
+      id: "grid", title: "Netz", main: this._formatPower(this._config.grid?.power, true),
+      sub: this._gridFlow() === "forward" ? "Energie aus Netz" : this._gridFlow() === "reverse" ? "Energie ins Netz" : "Kein Netzfluss",
+      entity: this._config.grid?.power, kind: "grid", x: 50, y: centerY + 2, w: 190, h: 88 * sizeFactor,
       activity: this._activityFromPower(this._powerW(this._config.grid?.power)),
-      badge: this._gridFlow() === "forward"
-        ? "Bezug"
-        : this._gridFlow() === "reverse"
-          ? "Einspeisung"
-          : "Ruhe"
+      badge: this._gridFlow() === "forward" ? "Bezug" : this._gridFlow() === "reverse" ? "Einspeisung" : "Ruhe"
     };
 
     const houseInfo = this._housePowerInfo();
     const house: DiagramNode = {
-      id: "house",
-      title: this._config.house?.name ?? "Haus",
+      id: "house", title: this._config.house?.name ?? "Haus",
       main: houseInfo.complete ? this._formatW(houseInfo.value, true) : "—",
-      sub: houseInfo.calculated
-        ? (houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig")
-        : (houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar"),
-      entity: this._config.house?.power,
-      kind: "house",
-      x: width - 240,
-      y: centerY + 2,
-      w: 190,
-      h: 88 * sizeFactor,
+      sub: houseInfo.calculated ? (houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig") : (houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar"),
+      entity: this._config.house?.power, kind: "house", x: width - 240, y: centerY + 2, w: 190, h: 88 * sizeFactor,
       activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown",
-      badge: houseInfo.calculated
-        ? (houseInfo.complete ? "Berechnet" : "Prüfen")
-        : undefined
+      badge: houseInfo.calculated ? (houseInfo.complete ? "Berechnet" : "Prüfen") : undefined
     };
 
     const bottom: BottomNode[] = [];
-    const bottomSpecs: Array<{
-      width: number;
-      make: (x: number, y: number, width: number) => BottomNode;
-    }> = [];
+    const bottomSpecs: Array<{ source: "center" | "house"; width: number; make: (x: number, y: number, width: number) => BottomNode; }> = [];
 
     batteries.forEach((battery, index) => {
-      bottomSpecs.push({
-        width: 205,
-        make: (x, y, nodeW) => ({
-          source: "center",
-          power: battery.power,
-          direction: this._batteryFlow(battery),
-          node: {
-            id: `battery-${index}`,
-            title: battery.name ?? `Batterie ${index + 1}`,
-            main: this._formatPower(battery.power, true),
-            sub: [this._batteryStatus(battery), this._formatSoc(battery.soc), this._batteryEtaNodeText(battery)]
-              .filter(Boolean)
-              .join(" · "),
-            entity: battery.power ?? battery.soc,
-            kind: "battery",
-            x,
-            y,
-            w: nodeW,
-            h: 90 * sizeFactor,
-            activity: this._activityFromPower(this._powerW(battery.power)),
-            batterySoc: this._clampPercent(this._number(battery.soc)),
-            batteryIndex: index,
-            warning: this._batteryWarnings(battery).length > 0,
-            badge: this._batteryWarnings(battery).length ? "⚠ Prüfen" : undefined
-          }
-        })
-      });
+      bottomSpecs.push({ source: "center", width: 205, make: (x, y, nodeW) => ({
+        source: "center", power: battery.power, direction: this._batteryFlow(battery),
+        node: {
+          id: `battery-${index}`, title: battery.name ?? `Batterie ${index + 1}`, main: this._formatPower(battery.power, true),
+          sub: [this._batteryStatus(battery), this._formatSoc(battery.soc), this._batteryEtaNodeText(battery)].filter(Boolean).join(" · "),
+          entity: battery.power ?? battery.soc, kind: "battery", x, y, w: nodeW, h: 90 * sizeFactor,
+          activity: this._activityFromPower(this._powerW(battery.power)), batterySoc: this._clampPercent(this._number(battery.soc)),
+          batteryIndex: index, warning: this._batteryWarnings(battery).length > 0, badge: this._batteryWarnings(battery).length ? "⚠ Prüfen" : undefined
+        }
+      })});
     });
 
     if (this._config.heat_pump) {
       const hp = this._config.heat_pump;
-      bottomSpecs.push({
-        width: 225,
-        make: (x, y, nodeW) => ({
-          source: hp.part_of_house ?? true ? "house" : "center",
-          power: hp.power,
-          direction: this._positiveFlow(this._powerW(hp.power)),
-          node: {
-            id: "heat-pump",
-            title: hp.name ?? "Wärmepumpe",
-            main: this._formatPower(hp.power, true),
-            sub: this._heatPumpSummary(hp),
-            entity: hp.power,
-            kind: "heat",
-            x,
-            y,
-            w: nodeW,
-            h: 94 * sizeFactor,
-            heatPump: true,
-            activity: this._activityFromPower(this._powerW(hp.power)),
-            badge: this._heatPumpBadge(hp)
-          }
-        })
-      });
+      const source: "center" | "house" = hp.part_of_house ?? true ? "house" : "center";
+      bottomSpecs.push({ source, width: 225, make: (x, y, nodeW) => ({
+        source, power: hp.power, direction: this._positiveFlow(this._powerW(hp.power)),
+        node: { id: "heat-pump", title: hp.name ?? "Wärmepumpe", main: this._formatPower(hp.power, true), sub: this._heatPumpSummary(hp), entity: hp.power,
+          kind: "heat", x, y, w: nodeW, h: 94 * sizeFactor, heatPump: true, activity: this._activityFromPower(this._powerW(hp.power)), badge: this._heatPumpBadge(hp) }
+      })});
     }
 
     consumers.forEach((consumer, index) => {
-      bottomSpecs.push({
-        width: 205,
-        make: (x, y, nodeW) => ({
-          source: consumer.part_of_house ?? true ? "house" : "center",
-          power: consumer.power,
-          direction: this._positiveFlow(this._powerW(consumer.power)),
-          node: {
-            id: `consumer-${index}`,
-            title: consumer.name ?? `Verbraucher ${index + 1}`,
-            main: this._formatPower(consumer.power, true),
-            sub: consumer.part_of_house ?? true ? "Teil des Hausverbrauchs" : "Direkter Verbraucher",
-            entity: consumer.power,
-            kind: "consumer",
-            x,
-            y,
-            w: nodeW,
-            h: 90 * sizeFactor,
-            activity: this._activityFromPower(this._powerW(consumer.power))
-          }
-        })
-      });
+      const source: "center" | "house" = consumer.part_of_house ?? true ? "house" : "center";
+      bottomSpecs.push({ source, width: 205, make: (x, y, nodeW) => ({
+        source, power: consumer.power, direction: this._positiveFlow(this._powerW(consumer.power)),
+        node: { id: `consumer-${index}`, title: consumer.name ?? `Verbraucher ${index + 1}`, main: this._formatPower(consumer.power, true),
+          sub: consumer.part_of_house ?? true ? "Teil des Hausverbrauchs" : "Direkter Verbraucher", entity: consumer.power, kind: "consumer",
+          x, y, w: nodeW, h: 90 * sizeFactor, activity: this._activityFromPower(this._powerW(consumer.power)) }
+      })});
     });
 
     const bottomStartY = centerY + center.h + 74;
-    const bottomColumns = Math.min(3, Math.max(1, bottomSpecs.length));
-    const bottomGapX = 18 * densityFactor;
-    // Extra vertical lane space is deliberate: all consumer/storage lines are
-    // routed through side buses above the nodes rather than diagonally through them.
-    const bottomGapY = 34 * densityFactor;
-    const cellW = (width - sideMargin * 2 - Math.max(0, bottomColumns - 1) * bottomGapX) / bottomColumns;
+    const bottomGapX = 16 * densityFactor;
+    const bottomGapY = 36 * densityFactor;
     const bottomRowH = 94 * sizeFactor;
+    const sourceGap = 34 * densityFactor;
+    const centerSpecs = bottomSpecs.filter((spec) => spec.source === "center");
+    const houseSpecs = bottomSpecs.filter((spec) => spec.source === "house");
+    const bothGroups = centerSpecs.length > 0 && houseSpecs.length > 0;
 
-    bottomSpecs.forEach((spec, index) => {
-      const row = Math.floor(index / bottomColumns);
-      const col = index % bottomColumns;
-      const itemsInRow = Math.min(bottomColumns, bottomSpecs.length - row * bottomColumns);
-      const rowWidth = itemsInRow * cellW + Math.max(0, itemsInRow - 1) * bottomGapX;
-      const rowStartX = (width - rowWidth) / 2;
-      const nodeW = Math.min(spec.width, cellW);
-      const cellX = rowStartX + col * (cellW + bottomGapX);
-      const x = cellX + (cellW - nodeW) / 2;
-      const y = bottomStartY + row * (bottomRowH + bottomGapY);
-      bottom.push(spec.make(x, y, nodeW));
-    });
+    const placeGroup = (specs: typeof bottomSpecs, regionX: number, regionW: number): number => {
+      if (!specs.length) return 0;
+      const columns = Math.min(specs.length >= 5 ? 3 : 2, Math.max(1, specs.length));
+      const cellW = (regionW - Math.max(0, columns - 1) * bottomGapX) / columns;
+      specs.forEach((spec, index) => {
+        const row = Math.floor(index / columns);
+        const col = index % columns;
+        const itemsInRow = Math.min(columns, specs.length - row * columns);
+        const rowWidth = itemsInRow * cellW + Math.max(0, itemsInRow - 1) * bottomGapX;
+        const rowStartX = regionX + (regionW - rowWidth) / 2;
+        const nodeW = Math.min(spec.width, cellW);
+        const cellX = rowStartX + col * (cellW + bottomGapX);
+        const x = cellX + (cellW - nodeW) / 2;
+        const y = bottomStartY + row * (bottomRowH + bottomGapY);
+        bottom.push(spec.make(x, y, nodeW));
+      });
+      return Math.ceil(specs.length / columns);
+    };
 
-    const bottomRows = bottomSpecs.length
-      ? Math.ceil(bottomSpecs.length / bottomColumns)
-      : 0;
+    let leftRows = 0;
+    let rightRows = 0;
+    if (bothGroups) {
+      const regionW = (width - sideMargin * 2 - sourceGap) / 2;
+      leftRows = placeGroup(centerSpecs, sideMargin, regionW);
+      rightRows = placeGroup(houseSpecs, sideMargin + regionW + sourceGap, regionW);
+    } else if (centerSpecs.length) {
+      leftRows = placeGroup(centerSpecs, sideMargin, width - sideMargin * 2);
+    } else if (houseSpecs.length) {
+      rightRows = placeGroup(houseSpecs, sideMargin, width - sideMargin * 2);
+    }
+
+    const bottomRows = Math.max(leftRows, rightRows);
     const height = bottomRows
       ? bottomStartY + bottomRows * bottomRowH + Math.max(0, bottomRows - 1) * bottomGapY + 30
       : centerY + center.h + 38;
 
-    return { width, height, center, grid, house, pvClusters, bottom };
+    return { width, height, center, grid, house, pvClusters, pvGroup, bottom };
   }
 
   private _heatPumpBadge(hp: HeatPumpConfig): string {
@@ -1678,7 +1653,10 @@ export class AdvancedPowerFlowCard extends LitElement {
           : nothing}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
         ${node.sub
-          ? svg`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, 34)}</text>`
+          ? svg`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>`
+          : nothing}
+        ${node.sub2
+          ? svg`<text x=${node.x + 14} y=${subY + 17} class="node-sub node-sub-secondary">${this._short(node.sub2, 42)}</text>`
           : nothing}
         ${node.kind === "battery" && node.batterySoc !== undefined
           ? svg`
@@ -2484,7 +2462,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     return html`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._groupedPvLayout() ? "pv-grouped" : (this._compactPvLayout() ? "pv-compact" : "pv-expanded")} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -2556,36 +2534,38 @@ export class AdvancedPowerFlowCard extends LitElement {
             role="img"
             aria-label="Energiefluss"
           >
+            ${layout.pvGroup
+              ? svg`
+                <rect x=${layout.pvGroup.x} y=${layout.pvGroup.y} width=${layout.pvGroup.width} height=${layout.pvGroup.height} rx="26" class="pv-group-bg"></rect>
+                <text x=${layout.pvGroup.x + 18} y=${layout.pvGroup.y + 23} class="pv-group-title">☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+              `
+              : nothing}
+
             ${layout.pvClusters.map((cluster) => {
               const systemPower = this._pvSystemPowerW(cluster.system);
               return svg`
-                <rect
-                  x=${cluster.x}
-                  y=${cluster.y}
-                  width=${cluster.width}
-                  height=${cluster.height}
-                  rx="24"
-                  class="cluster-bg"
-                ></rect>
+                ${!layout.pvGroup
+                  ? svg`<rect x=${cluster.x} y=${cluster.y} width=${cluster.width} height=${cluster.height} rx="24" class="cluster-bg"></rect>`
+                  : nothing}
                 ${cluster.children.map((child, childIndex) => {
                   const power = this._powerW(cluster.system.children?.[childIndex]?.power);
-                  return this._flowPath(
-                    this._connectionPath(child, cluster.parent),
-                    this._positiveFlow(power),
-                    power,
-                    `pv-child-${cluster.systemIndex}-${childIndex}`,
-                    [child.id, cluster.parent.id]
-                  );
+                  return this._flowPath(this._connectionPath(child, cluster.parent), this._positiveFlow(power), power,
+                    `pv-child-${cluster.systemIndex}-${childIndex}`, [child.id, cluster.parent.id]);
                 })}
-                ${this._flowPath(
-                  this._connectionPath(cluster.parent, layout.center),
-                  this._positiveFlow(systemPower),
-                  systemPower,
-                  `pv-system-${cluster.systemIndex}`,
-                  [cluster.parent.id, layout.center.id, ...cluster.children.map((child) => child.id)]
-                )}
+                ${!layout.pvGroup
+                  ? this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower,
+                      `pv-system-${cluster.systemIndex}`, [cluster.parent.id, layout.center.id, ...cluster.children.map((child) => child.id)])
+                  : nothing}
               `;
             })}
+
+            ${layout.pvGroup
+              ? this._flowPath(
+                  `M ${layout.pvGroup.x + layout.pvGroup.width / 2} ${layout.pvGroup.y + layout.pvGroup.height} L ${layout.center.x + layout.center.w / 2} ${layout.center.y}`,
+                  this._positiveFlow(this._totalPvW()), this._totalPvW(), "pv-group",
+                  ["center", ...(this._config.solar ?? []).map((_, index) => `pv-system-${index}`)]
+                )
+              : nothing}
 
             ${this._flowPath(
               this._horizontalPath(layout.grid, layout.center),
@@ -2831,6 +2811,24 @@ export class AdvancedPowerFlowCard extends LitElement {
       fill: color-mix(in srgb, var(--apfc-solar) 2%, var(--secondary-background-color));
       stroke: color-mix(in srgb, var(--apfc-solar) 16%, var(--divider-color));
       stroke-width: 1.15;
+    }
+
+    .pv-group-bg {
+      fill: color-mix(in srgb, var(--apfc-solar) 2.5%, var(--secondary-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 20%, var(--divider-color));
+      stroke-width: 1.25;
+    }
+
+    .pv-group-title {
+      fill: var(--secondary-text-color);
+      font-size: max(12px, calc(var(--apfc-node-sub-size) * .92));
+      font-weight: 650;
+    }
+
+    .node-sub-secondary { opacity: .9; }
+
+    ha-card.pv-grouped .node.pv-parent .node-bg {
+      fill: color-mix(in srgb, var(--apfc-solar) 9%, var(--card-background-color));
     }
 
     .flow-base {

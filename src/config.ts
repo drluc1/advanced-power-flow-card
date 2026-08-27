@@ -127,8 +127,12 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
         ? raw.layout_density
         : "auto",
     pv_layout:
-      raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "auto"
+      raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "grouped" || raw.pv_layout === "auto"
         ? raw.pv_layout
+        : "auto",
+    pv_detail_level:
+      raw.pv_detail_level === "minimal" || raw.pv_detail_level === "compact" || raw.pv_detail_level === "full" || raw.pv_detail_level === "auto"
+        ? raw.pv_detail_level
         : "auto",
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
@@ -203,6 +207,7 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     mobile_scale: 1.06,
     layout_density: "auto",
     pv_layout: "auto",
+    pv_detail_level: "auto",
     daily_layout: "cards",
     night_mode: true
   };

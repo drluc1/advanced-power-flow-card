@@ -5,7 +5,8 @@ balance_warning_threshold: 50
 text_size: xlarge
 mobile_scale: 1.08
 layout_density: auto
-pv_layout: auto
+pv_layout: grouped
+pv_detail_level: compact
 daily_layout: cards
 night_mode: true
 

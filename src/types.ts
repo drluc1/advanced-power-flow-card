@@ -116,7 +116,8 @@ export interface CardColorsConfig {
 export type TextSize = "small" | "normal" | "large" | "xlarge";
 export type DailyLayout = "auto" | "cards" | "compact";
 export type LayoutDensity = "auto" | "compact" | "comfortable";
-export type PvLayoutMode = "auto" | "expanded" | "compact";
+export type PvLayoutMode = "auto" | "expanded" | "compact" | "grouped";
+export type PvDetailLevel = "auto" | "minimal" | "compact" | "full";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -157,6 +158,7 @@ export interface AdvancedPowerFlowCardConfig {
   mobile_scale?: number;
   layout_density?: LayoutDensity;
   pv_layout?: PvLayoutMode;
+  pv_detail_level?: PvDetailLevel;
   daily_layout?: DailyLayout;
   night_mode?: boolean;
 }

@@ -651,7 +651,8 @@ function normalizeConfig(input) {
 		text_size: raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" || raw.text_size === "xlarge" ? raw.text_size : "large",
 		mobile_scale: typeof raw.mobile_scale === "number" && Number.isFinite(raw.mobile_scale) ? Math.min(1.3, Math.max(.9, raw.mobile_scale)) : 1.06,
 		layout_density: raw.layout_density === "compact" || raw.layout_density === "comfortable" || raw.layout_density === "auto" ? raw.layout_density : "auto",
-		pv_layout: raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "auto" ? raw.pv_layout : "auto",
+		pv_layout: raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "grouped" || raw.pv_layout === "auto" ? raw.pv_layout : "auto",
+		pv_detail_level: raw.pv_detail_level === "minimal" || raw.pv_detail_level === "compact" || raw.pv_detail_level === "full" || raw.pv_detail_level === "auto" ? raw.pv_detail_level : "auto",
 		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
 		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
 	};
@@ -753,6 +754,7 @@ function createStubConfig() {
 		mobile_scale: 1.06,
 		layout_density: "auto",
 		pv_layout: "auto",
+		pv_detail_level: "auto",
 		daily_layout: "cards",
 		night_mode: true
 	};
@@ -982,20 +984,44 @@ var AdvancedPowerFlowCardEditor = class extends i {
           ${this._selectInput("PV-Darstellung", this._config.pv_layout, [
 			{
 				value: "auto",
-				label: "Automatisch (bei vielen Anlagen kompakt)"
+				label: "Automatisch – mehrere Anlagen gruppieren"
+			},
+			{
+				value: "grouped",
+				label: "Gruppiert – eine gemeinsame PV-Kachel"
 			},
 			{
 				value: "expanded",
-				label: "Immer vollständig mit MPPTs"
+				label: "Getrennt – klassische Darstellung"
 			},
 			{
 				value: "compact",
-				label: "Kompakt – nur PV-Gesamtsysteme"
+				label: "Getrennt kompakt"
 			}
 		], (value) => this._with((config) => {
 			config.pv_layout = value;
 		}))}
-          <div class="help">Im kompakten PV-Modus bleiben die MPPTs im Hauptdiagramm ausgeblendet. Ein Klick auf das PV-Gesamtsystem öffnet weiterhin die vollständige MPPT-Detailansicht.</div>
+          ${this._selectInput("PV-Detailstufe im Hauptdiagramm", this._config.pv_detail_level, [
+			{
+				value: "auto",
+				label: "Automatisch"
+			},
+			{
+				value: "minimal",
+				label: "Minimal – nur Gesamtleistung"
+			},
+			{
+				value: "compact",
+				label: "Kompakt – MPPT-Leistungen als Zeilen"
+			},
+			{
+				value: "full",
+				label: "Vollständig – einzelne MPPT-Kacheln"
+			}
+		], (value) => this._with((config) => {
+			config.pv_detail_level = value;
+		}))}
+          <div class="help">„Gruppiert + Kompakt“ fasst alle PV-Anlagen in einer gemeinsamen Kachel zusammen und zeigt die MPPT-Leistungen platzsparend direkt unter der jeweiligen Anlagenleistung. Ein Klick auf ein PV-System öffnet weiterhin die vollständige Detailansicht.</div>
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
 			{
@@ -1548,7 +1574,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME$1 = "Advanced Power Flow Card";
-var CARD_VERSION$1 = "0.3.1";
+var CARD_VERSION$1 = "0.3.2";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -2412,35 +2438,72 @@ var AdvancedPowerFlowCard = class extends i {
 		if (value.length <= max) return value;
 		return `${value.slice(0, max - 1)}…`;
 	}
-	_compactPvLayout() {
+	_groupedPvLayout() {
 		const mode = this._config.pv_layout ?? "auto";
-		if (mode === "compact") return true;
-		if (mode === "expanded") return false;
-		return (this._config.solar ?? []).length >= 4;
+		if (mode === "grouped") return true;
+		if (mode === "expanded" || mode === "compact") return false;
+		return (this._config.solar ?? []).length >= 2;
+	}
+	_resolvedPvDetailLevel() {
+		const configured = this._config.pv_detail_level ?? "auto";
+		if (configured !== "auto") return configured;
+		const layout = this._config.pv_layout ?? "auto";
+		if (layout === "expanded") return "full";
+		if (layout === "compact") return "minimal";
+		return this._groupedPvLayout() ? "compact" : "full";
+	}
+	_compactPvLayout() {
+		return this._resolvedPvDetailLevel() !== "full";
+	}
+	_compactMpptLines(system) {
+		const children = system.children ?? [];
+		if (!children.length) return [];
+		const entries = children.map((child, index) => {
+			return `${this._short(child.name ?? `MPPT ${index + 1}`, 13)} ${this._formatPower(child.power, true)}`;
+		});
+		if (entries.length <= 2) return [entries.join(" · ")];
+		const first = entries.slice(0, 2).join(" · ");
+		let second = entries.slice(2, 4).join(" · ");
+		if (entries.length > 4) second += ` · +${entries.length - 4}`;
+		return [first, second];
 	}
 	_layout() {
 		const solar = this._config.solar ?? [];
 		const batteries = this._config.batteries ?? [];
 		const consumers = this._config.consumers ?? [];
-		const compactPv = this._compactPvLayout();
+		const groupedPv = this._groupedPvLayout();
+		const pvDetail = this._resolvedPvDetailLevel();
+		const showPvChildren = pvDetail === "full";
+		const showCompactMppts = pvDetail === "compact";
 		const width = 1e3;
 		const density = this._config.layout_density ?? "auto";
 		const densityFactor = density === "compact" ? .84 : density === "comfortable" ? 1.14 : 1;
 		const sizeFactor = this._config.text_size === "xlarge" ? 1.08 : 1;
 		const sideMargin = 28 * densityFactor;
-		const pvGapX = (compactPv ? 12 : 20) * densityFactor;
-		const pvGapY = (compactPv ? 12 : 20) * densityFactor;
-		const pvColumns = compactPv ? solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2 : solar.length <= 1 ? 1 : 2;
-		const clusterWidth = pvColumns === 1 ? 620 : (width - sideMargin * 2 - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
+		const groupX = 26;
+		const groupY = 18;
+		const groupW = 948;
+		const groupInnerPad = 14 * densityFactor;
+		const pvGapX = (groupedPv ? 14 : 20) * densityFactor;
+		const pvGapY = (groupedPv ? 13 : 20) * densityFactor;
+		let pvColumns;
+		if (groupedPv) {
+			if (pvDetail === "minimal") pvColumns = Math.min(3, Math.max(1, solar.length));
+			else pvColumns = solar.length <= 1 ? 1 : 2;
+		} else pvColumns = (this._config.pv_layout ?? "auto") === "compact" ? solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2 : solar.length <= 1 ? 1 : 2;
+		const availablePvWidth = groupedPv ? groupW - groupInnerPad * 2 : width - sideMargin * 2;
+		const clusterWidth = pvColumns === 1 ? Math.min(groupedPv ? availablePvWidth : 620, availablePvWidth) : (availablePvWidth - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
 		const childGapX = 12 * densityFactor;
 		const childGapY = 10 * densityFactor;
 		const childH = 78 * sizeFactor;
-		const parentMaxW = compactPv ? Math.min(300, clusterWidth - 20) : this._config.text_size === "xlarge" ? 450 : 430;
-		const parentH = (compactPv ? 80 : 86) * sizeFactor;
-		const clusterPadX = (compactPv ? 10 : 18) * densityFactor;
-		const clusterPadY = (compactPv ? 10 : 18) * densityFactor;
+		const clusterPadX = (groupedPv ? 8 : 18) * densityFactor;
+		const clusterPadY = (groupedPv ? 8 : 18) * densityFactor;
+		const compactTwoLines = showCompactMppts && solar.some((system) => this._compactMpptLines(system).length > 1);
+		const parentH = (showCompactMppts ? compactTwoLines ? 112 : 98 : 86) * sizeFactor;
+		const parentMaxW = groupedPv ? clusterWidth - clusterPadX * 2 : this._config.text_size === "xlarge" ? 450 : 430;
 		const pvClusters = [];
-		let pvY = 18;
+		let pvY = groupedPv ? 52 : 18;
+		let pvBottom = pvY;
 		for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
 			const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
 			const rowLayouts = [];
@@ -2448,8 +2511,8 @@ var AdvancedPowerFlowCard = class extends i {
 				const systemIndex = rowStart + localIndex;
 				const rowCount = rowSystems.length;
 				const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
-				const clusterX = (width - rowWidth) / 2 + localIndex * (clusterWidth + pvGapX);
-				const children = compactPv ? [] : system.children ?? [];
+				const clusterX = (groupedPv ? groupX + (groupW - rowWidth) / 2 : (width - rowWidth) / 2) + localIndex * (clusterWidth + pvGapX);
+				const children = showPvChildren ? system.children ?? [] : [];
 				const childColumns = Math.min(2, Math.max(1, children.length));
 				const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
 				const childrenAreaH = childRows ? childRows * childH + Math.max(0, childRows - 1) * childGapY : 0;
@@ -2464,11 +2527,13 @@ var AdvancedPowerFlowCard = class extends i {
 				const totalPv = this._totalPvW();
 				const pvShare = parentPower !== void 0 && totalPv !== void 0 && totalPv > this._threshold() ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100) : void 0;
 				const configuredChildren = system.children?.length ?? 0;
+				const mpptLines = showCompactMppts ? this._compactMpptLines(system) : [];
 				const parent = {
 					id: `pv-system-${systemIndex}`,
 					title: system.name ?? `PV ${systemIndex + 1}`,
 					main: this._formatW(parentPower, true),
-					sub: configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
+					sub: showCompactMppts && mpptLines.length ? mpptLines[0] : configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
+					sub2: showCompactMppts ? mpptLines[1] : void 0,
 					entity: system.power,
 					kind: "pv-parent",
 					x: parentX,
@@ -2515,10 +2580,20 @@ var AdvancedPowerFlowCard = class extends i {
 			});
 			pvClusters.push(...rowLayouts);
 			const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
+			pvBottom = pvY + rowHeight;
 			pvY += rowHeight + pvGapY;
 		}
-		if (!solar.length) pvY = 24;
-		const centerY = pvY + 34;
+		let pvGroup;
+		if (groupedPv && solar.length) {
+			pvGroup = {
+				x: groupX,
+				y: groupY,
+				width: groupW,
+				height: Math.max(92, pvBottom - groupY + 12)
+			};
+			pvBottom = pvGroup.y + pvGroup.height;
+		} else if (!solar.length) pvBottom = 24;
+		const centerY = pvBottom + 34;
 		const balance = this._systemBalanceInfo();
 		const center = {
 			id: "center",
@@ -2566,6 +2641,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const bottomSpecs = [];
 		batteries.forEach((battery, index) => {
 			bottomSpecs.push({
+				source: "center",
 				width: 205,
 				make: (x, y, nodeW) => ({
 					source: "center",
@@ -2597,10 +2673,12 @@ var AdvancedPowerFlowCard = class extends i {
 		});
 		if (this._config.heat_pump) {
 			const hp = this._config.heat_pump;
+			const source = hp.part_of_house ?? true ? "house" : "center";
 			bottomSpecs.push({
+				source,
 				width: 225,
 				make: (x, y, nodeW) => ({
-					source: hp.part_of_house ?? true ? "house" : "center",
+					source,
 					power: hp.power,
 					direction: this._positiveFlow(this._powerW(hp.power)),
 					node: {
@@ -2622,10 +2700,12 @@ var AdvancedPowerFlowCard = class extends i {
 			});
 		}
 		consumers.forEach((consumer, index) => {
+			const source = consumer.part_of_house ?? true ? "house" : "center";
 			bottomSpecs.push({
+				source,
 				width: 205,
 				make: (x, y, nodeW) => ({
-					source: consumer.part_of_house ?? true ? "house" : "center",
+					source,
 					power: consumer.power,
 					direction: this._positiveFlow(this._powerW(consumer.power)),
 					node: {
@@ -2645,23 +2725,38 @@ var AdvancedPowerFlowCard = class extends i {
 			});
 		});
 		const bottomStartY = centerY + center.h + 74;
-		const bottomColumns = Math.min(3, Math.max(1, bottomSpecs.length));
-		const bottomGapX = 18 * densityFactor;
-		const bottomGapY = 34 * densityFactor;
-		const cellW = (width - sideMargin * 2 - Math.max(0, bottomColumns - 1) * bottomGapX) / bottomColumns;
+		const bottomGapX = 16 * densityFactor;
+		const bottomGapY = 36 * densityFactor;
 		const bottomRowH = 94 * sizeFactor;
-		bottomSpecs.forEach((spec, index) => {
-			const row = Math.floor(index / bottomColumns);
-			const col = index % bottomColumns;
-			const itemsInRow = Math.min(bottomColumns, bottomSpecs.length - row * bottomColumns);
-			const rowWidth = itemsInRow * cellW + Math.max(0, itemsInRow - 1) * bottomGapX;
-			const rowStartX = (width - rowWidth) / 2;
-			const nodeW = Math.min(spec.width, cellW);
-			const x = rowStartX + col * (cellW + bottomGapX) + (cellW - nodeW) / 2;
-			const y = bottomStartY + row * (bottomRowH + bottomGapY);
-			bottom.push(spec.make(x, y, nodeW));
-		});
-		const bottomRows = bottomSpecs.length ? Math.ceil(bottomSpecs.length / bottomColumns) : 0;
+		const sourceGap = 34 * densityFactor;
+		const centerSpecs = bottomSpecs.filter((spec) => spec.source === "center");
+		const houseSpecs = bottomSpecs.filter((spec) => spec.source === "house");
+		const bothGroups = centerSpecs.length > 0 && houseSpecs.length > 0;
+		const placeGroup = (specs, regionX, regionW) => {
+			if (!specs.length) return 0;
+			const columns = Math.min(specs.length >= 5 ? 3 : 2, Math.max(1, specs.length));
+			const cellW = (regionW - Math.max(0, columns - 1) * bottomGapX) / columns;
+			specs.forEach((spec, index) => {
+				const row = Math.floor(index / columns);
+				const col = index % columns;
+				const itemsInRow = Math.min(columns, specs.length - row * columns);
+				const rowStartX = regionX + (regionW - (itemsInRow * cellW + Math.max(0, itemsInRow - 1) * bottomGapX)) / 2;
+				const nodeW = Math.min(spec.width, cellW);
+				const x = rowStartX + col * (cellW + bottomGapX) + (cellW - nodeW) / 2;
+				const y = bottomStartY + row * (bottomRowH + bottomGapY);
+				bottom.push(spec.make(x, y, nodeW));
+			});
+			return Math.ceil(specs.length / columns);
+		};
+		let leftRows = 0;
+		let rightRows = 0;
+		if (bothGroups) {
+			const regionW = (width - sideMargin * 2 - sourceGap) / 2;
+			leftRows = placeGroup(centerSpecs, sideMargin, regionW);
+			rightRows = placeGroup(houseSpecs, sideMargin + regionW + sourceGap, regionW);
+		} else if (centerSpecs.length) leftRows = placeGroup(centerSpecs, sideMargin, width - sideMargin * 2);
+		else if (houseSpecs.length) rightRows = placeGroup(houseSpecs, sideMargin, width - sideMargin * 2);
+		const bottomRows = Math.max(leftRows, rightRows);
 		return {
 			width,
 			height: bottomRows ? bottomStartY + bottomRows * bottomRowH + Math.max(0, bottomRows - 1) * bottomGapY + 30 : centerY + center.h + 38,
@@ -2669,6 +2764,7 @@ var AdvancedPowerFlowCard = class extends i {
 			grid,
 			house,
 			pvClusters,
+			pvGroup,
 			bottom
 		};
 	}
@@ -2784,7 +2880,8 @@ var AdvancedPowerFlowCard = class extends i {
             </g>
           ` : A}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
-        ${node.sub ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, 34)}</text>` : A}
+        ${node.sub ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>` : A}
+        ${node.sub2 ? w`<text x=${node.x + 14} y=${subY + 17} class="node-sub node-sub-secondary">${this._short(node.sub2, 42)}</text>` : A}
         ${node.kind === "battery" && node.batterySoc !== void 0 ? w`
             <rect
               x=${socTrackX}
@@ -3431,7 +3528,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._groupedPvLayout() ? "pv-grouped" : this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -3497,28 +3594,28 @@ var AdvancedPowerFlowCard = class extends i {
             role="img"
             aria-label="Energiefluss"
           >
+            ${layout.pvGroup ? w`
+                <rect x=${layout.pvGroup.x} y=${layout.pvGroup.y} width=${layout.pvGroup.width} height=${layout.pvGroup.height} rx="26" class="pv-group-bg"></rect>
+                <text x=${layout.pvGroup.x + 18} y=${layout.pvGroup.y + 23} class="pv-group-title">☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+              ` : A}
+
             ${layout.pvClusters.map((cluster) => {
 			const systemPower = this._pvSystemPowerW(cluster.system);
 			return w`
-                <rect
-                  x=${cluster.x}
-                  y=${cluster.y}
-                  width=${cluster.width}
-                  height=${cluster.height}
-                  rx="24"
-                  class="cluster-bg"
-                ></rect>
+                ${!layout.pvGroup ? w`<rect x=${cluster.x} y=${cluster.y} width=${cluster.width} height=${cluster.height} rx="24" class="cluster-bg"></rect>` : A}
                 ${cluster.children.map((child, childIndex) => {
 				const power = this._powerW(cluster.system.children?.[childIndex]?.power);
 				return this._flowPath(this._connectionPath(child, cluster.parent), this._positiveFlow(power), power, `pv-child-${cluster.systemIndex}-${childIndex}`, [child.id, cluster.parent.id]);
 			})}
-                ${this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower, `pv-system-${cluster.systemIndex}`, [
+                ${!layout.pvGroup ? this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower, `pv-system-${cluster.systemIndex}`, [
 				cluster.parent.id,
 				layout.center.id,
 				...cluster.children.map((child) => child.id)
-			])}
+			]) : A}
               `;
 		})}
+
+            ${layout.pvGroup ? this._flowPath(`M ${layout.pvGroup.x + layout.pvGroup.width / 2} ${layout.pvGroup.y + layout.pvGroup.height} L ${layout.center.x + layout.center.w / 2} ${layout.center.y}`, this._positiveFlow(this._totalPvW()), this._totalPvW(), "pv-group", ["center", ...(this._config.solar ?? []).map((_, index) => `pv-system-${index}`)]) : A}
 
             ${this._flowPath(this._horizontalPath(layout.grid, layout.center), this._gridFlow(), this._powerW(this._config.grid?.power), "grid", [layout.grid.id, layout.center.id])}
 
@@ -3736,6 +3833,24 @@ var AdvancedPowerFlowCard = class extends i {
       fill: color-mix(in srgb, var(--apfc-solar) 2%, var(--secondary-background-color));
       stroke: color-mix(in srgb, var(--apfc-solar) 16%, var(--divider-color));
       stroke-width: 1.15;
+    }
+
+    .pv-group-bg {
+      fill: color-mix(in srgb, var(--apfc-solar) 2.5%, var(--secondary-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 20%, var(--divider-color));
+      stroke-width: 1.25;
+    }
+
+    .pv-group-title {
+      fill: var(--secondary-text-color);
+      font-size: max(12px, calc(var(--apfc-node-sub-size) * .92));
+      font-weight: 650;
+    }
+
+    .node-sub-secondary { opacity: .9; }
+
+    ha-card.pv-grouped .node.pv-parent .node-bg {
+      fill: color-mix(in srgb, var(--apfc-solar) 9%, var(--card-background-color));
     }
 
     .flow-base {
