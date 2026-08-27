@@ -5,6 +5,7 @@ balance_warning_threshold: 50
 text_size: xlarge
 mobile_scale: 1.08
 layout_density: auto
+pv_layout: auto
 daily_layout: cards
 night_mode: true
 
@@ -95,6 +96,8 @@ heat_pump:
   name: Wärmepumpe
   power: sensor.heatpump_power
   part_of_house: true
+  display_temperature: sensor.heatpump_flow_temperature
+  display_temperature_label: VL
   flow_temperature: sensor.heatpump_flow_temperature
   return_temperature: sensor.heatpump_return_temperature
   outdoor_temperature: sensor.heatpump_outdoor_temperature

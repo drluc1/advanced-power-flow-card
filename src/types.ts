@@ -116,6 +116,7 @@ export interface CardColorsConfig {
 export type TextSize = "small" | "normal" | "large" | "xlarge";
 export type DailyLayout = "auto" | "cards" | "compact";
 export type LayoutDensity = "auto" | "compact" | "comfortable";
+export type PvLayoutMode = "auto" | "expanded" | "compact";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -132,6 +133,8 @@ export interface HeatPumpConfig extends ConsumerConfig {
   daily_energy?: string;
   daily_thermal_energy?: string;
   daily_cop?: string;
+  display_temperature?: string;
+  display_temperature_label?: string;
   details_expanded_by_default?: boolean;
 }
 
@@ -153,6 +156,7 @@ export interface AdvancedPowerFlowCardConfig {
   text_size?: TextSize;
   mobile_scale?: number;
   layout_density?: LayoutDensity;
+  pv_layout?: PvLayoutMode;
   daily_layout?: DailyLayout;
   night_mode?: boolean;
 }

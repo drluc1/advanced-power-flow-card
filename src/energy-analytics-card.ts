@@ -11,7 +11,7 @@ import type {
 } from "./energy-analytics-types";
 
 const CARD_NAME = "Energy Analytics Card";
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 type EnergySeriesKey =
   | "pv_total"

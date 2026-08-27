@@ -5,7 +5,7 @@ One HACS dashboard package containing two Home Assistant Lovelace cards:
 - `custom:advanced-power-flow-card` for live power flow, batteries, PV/MPPTs and consumers.
 - `custom:energy-analytics-card` for Recorder / Long-Term-Statistics charts and kWh/kWp analysis.
 
-## v0.3.0 highlights
+## v0.3.1 highlights
 
 - New Energy Analytics Card with 30-day, 12-month and 5-year views.
 - Interactive energy bar chart for PV, house, grid, batteries, heat pump and wallbox.
@@ -16,6 +16,19 @@ One HACS dashboard package containing two Home Assistant Lovelace cards:
 - Both cards are delivered through the same `advanced-power-flow-card.js`.
 
 See `example-energy-analytics.yaml` and `LONG-TERM-SENSORS.md` for setup.
+
+### Live-layout additions in v0.3.1
+
+```yaml
+pv_layout: auto       # auto | expanded | compact
+
+heat_pump:
+  display_temperature: sensor.heatpump_flow_temperature
+  display_temperature_label: VL
+```
+
+`compact` hides MPPT boxes only in the live flow diagram; clicking the PV-system total still opens the complete MPPT detail panel. `auto` uses the compact PV layout when four or more PV systems exist. PV systems without MPPTs no longer reserve an empty MPPT area. Lower battery/consumer connections are routed through side buses so flow lines do not pass through other nodes.
+
 
 ## Existing Power Flow features
 

@@ -204,6 +204,12 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             { value: "compact", label: "Kompakt" },
             { value: "comfortable", label: "Großzügig" }
           ], (value) => this._with((config) => { config.layout_density = value as "auto" | "compact" | "comfortable"; }))}
+          ${this._selectInput("PV-Darstellung", this._config.pv_layout, [
+            { value: "auto", label: "Automatisch (bei vielen Anlagen kompakt)" },
+            { value: "expanded", label: "Immer vollständig mit MPPTs" },
+            { value: "compact", label: "Kompakt – nur PV-Gesamtsysteme" }
+          ], (value) => this._with((config) => { config.pv_layout = value as "auto" | "expanded" | "compact"; }))}
+          <div class="help">Im kompakten PV-Modus bleiben die MPPTs im Hauptdiagramm ausgeblendet. Ein Klick auf das PV-Gesamtsystem öffnet weiterhin die vollständige MPPT-Detailansicht.</div>
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },
@@ -403,6 +409,9 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             ${this._entityPicker("Elektrische Leistung", this._config.heat_pump?.power, (value) => this._updateHeatPump({ power: value }))}
             ${this._checkbox("Teil des Hausverbrauchs", this._config.heat_pump?.part_of_house, true, (value) => this._updateHeatPump({ part_of_house: value }))}
             ${this._checkbox("Details standardmäßig geöffnet", this._config.heat_pump?.details_expanded_by_default, false, (value) => this._updateHeatPump({ details_expanded_by_default: value }))}
+            ${this._entityPicker("Temperatur direkt im Energiefluss (optional)", this._config.heat_pump?.display_temperature, (value) => this._updateHeatPump({ display_temperature: value }))}
+            ${this._textInput("Kurzlabel für Diagrammtemperatur", this._config.heat_pump?.display_temperature_label, "Temp", (value) => this._updateHeatPump({ display_temperature_label: value }))}
+            <div class="help">Wenn keine separate Diagrammtemperatur gesetzt ist, verwendet die Card automatisch die Vorlauftemperatur. Beispiel: „VL 34,5 °C · COP 3,8“.</div>
             ${this._entityPicker("Vorlauftemperatur", this._config.heat_pump?.flow_temperature, (value) => this._updateHeatPump({ flow_temperature: value }))}
             ${this._entityPicker("Rücklauftemperatur", this._config.heat_pump?.return_temperature, (value) => this._updateHeatPump({ return_temperature: value }))}
             ${this._entityPicker("Außentemperatur", this._config.heat_pump?.outdoor_temperature, (value) => this._updateHeatPump({ outdoor_temperature: value }))}

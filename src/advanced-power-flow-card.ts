@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -1221,76 +1221,98 @@ export class AdvancedPowerFlowCard extends LitElement {
     return `${value.slice(0, max - 1)}…`;
   }
 
+  private _compactPvLayout(): boolean {
+    const mode = this._config.pv_layout ?? "auto";
+    if (mode === "compact") return true;
+    if (mode === "expanded") return false;
+
+    const systems = this._config.solar ?? [];
+    // Automatic mode becomes compact only when the PV section would otherwise
+    // dominate the card. Manual "expanded" always wins.
+    return systems.length >= 4;
+  }
+
   private _layout(): LayoutResult {
     const solar = this._config.solar ?? [];
     const batteries = this._config.batteries ?? [];
     const consumers = this._config.consumers ?? [];
-    const hasHeatPump = Boolean(this._config.heat_pump);
+    const compactPv = this._compactPvLayout();
 
-    // v0.2.1 uses a fixed logical width and grows vertically instead of
-    // horizontally. The SVG is then scaled to the available card width, so
-    // every node stays visible without an internal horizontal scrollbar.
+    // Fixed logical width: the SVG scales to the available card width. The
+    // diagram grows vertically, never horizontally, so mobile stays overviewable.
     const width = 1000;
     const density = this._config.layout_density ?? "auto";
     const densityFactor = density === "compact" ? 0.84 : density === "comfortable" ? 1.14 : 1;
     const sizeFactor = this._config.text_size === "xlarge" ? 1.08 : 1;
     const sideMargin = 28 * densityFactor;
-    const pvGapX = 20 * densityFactor;
-    const pvGapY = 20 * densityFactor;
-    const pvColumns = solar.length <= 1 ? 1 : 2;
+    const pvGapX = (compactPv ? 12 : 20) * densityFactor;
+    const pvGapY = (compactPv ? 12 : 20) * densityFactor;
+    const pvColumns = compactPv
+      ? (solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2)
+      : (solar.length <= 1 ? 1 : 2);
     const clusterWidth = pvColumns === 1
       ? 620
-      : (width - sideMargin * 2 - pvGapX) / 2;
+      : (width - sideMargin * 2 - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
 
     const childGapX = 12 * densityFactor;
     const childGapY = 10 * densityFactor;
     const childH = 78 * sizeFactor;
-    const parentMaxW = this._config.text_size === "xlarge" ? 450 : 430;
-    const parentH = 86 * sizeFactor;
-    const clusterPadX = 18 * densityFactor;
-    const clusterPadY = 18 * densityFactor;
+    const parentMaxW = compactPv
+      ? Math.min(300, clusterWidth - 20)
+      : (this._config.text_size === "xlarge" ? 450 : 430);
+    const parentH = (compactPv ? 80 : 86) * sizeFactor;
+    const clusterPadX = (compactPv ? 10 : 18) * densityFactor;
+    const clusterPadY = (compactPv ? 10 : 18) * densityFactor;
 
     const pvClusters: PvClusterLayout[] = [];
     let pvY = 18;
 
     for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
       const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
-      const maxChildren = Math.max(
-        1,
-        ...rowSystems.map((system) => Math.max(1, system.children?.length ?? 0))
-      );
-      const maxChildRows = Math.ceil(maxChildren / 2);
-      const childrenAreaH = maxChildRows * childH + Math.max(0, maxChildRows - 1) * childGapY;
-      const rowHeight = clusterPadY + childrenAreaH + 16 + parentH + clusterPadY;
+      const rowLayouts: PvClusterLayout[] = [];
 
       rowSystems.forEach((system, localIndex) => {
         const systemIndex = rowStart + localIndex;
         const rowCount = rowSystems.length;
-        const clusterX = rowCount === 1
-          ? (width - clusterWidth) / 2
-          : sideMargin + localIndex * (clusterWidth + pvGapX);
+        const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
+        const rowStartX = (width - rowWidth) / 2;
+        const clusterX = rowStartX + localIndex * (clusterWidth + pvGapX);
 
-        const children = system.children ?? [];
+        // In compact mode the MPPTs stay available in the detail panel, but do
+        // not consume any space in the main diagram.
+        const children = compactPv ? [] : (system.children ?? []);
         const childColumns = Math.min(2, Math.max(1, children.length));
+        const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
+        const childrenAreaH = childRows
+          ? childRows * childH + Math.max(0, childRows - 1) * childGapY
+          : 0;
+        const childParentGap = children.length ? 14 * densityFactor : 0;
+        const clusterHeight = clusterPadY + childrenAreaH + childParentGap + parentH + clusterPadY;
+
         const childW = childColumns === 1
           ? Math.min(220, clusterWidth - clusterPadX * 2)
           : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
 
         const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
         const parentX = clusterX + clusterWidth / 2 - parentW / 2;
-        const parentY = pvY + clusterPadY + childrenAreaH + 16;
+        // Important: with zero MPPTs the parent sits directly at the top of its
+        // cluster. This removes the old empty placeholder area.
+        const parentY = pvY + clusterPadY + childrenAreaH + childParentGap;
         const parentPower = this._pvSystemPowerW(system);
         const systemWarnings = this._pvSystemWarnings(system);
         const totalPv = this._totalPvW();
         const pvShare = parentPower !== undefined && totalPv !== undefined && totalPv > this._threshold()
           ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100)
           : undefined;
+        const configuredChildren = system.children?.length ?? 0;
 
         const parent: DiagramNode = {
           id: `pv-system-${systemIndex}`,
           title: system.name ?? `PV ${systemIndex + 1}`,
           main: this._formatW(parentPower, true),
-          sub: children.length ? `${children.length} MPPT${children.length === 1 ? "" : "s"}` : "PV-System",
+          sub: configuredChildren
+            ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}`
+            : "PV-System",
           entity: system.power,
           kind: "pv-parent",
           x: parentX,
@@ -1309,7 +1331,7 @@ export class AdvancedPowerFlowCard extends LitElement {
           const col = childIndex % childColumns;
           const itemsInThisRow = Math.min(childColumns, children.length - row * childColumns);
           const usedWidth = itemsInThisRow * childW + Math.max(0, itemsInThisRow - 1) * childGapX;
-          const rowStartX = clusterX + (clusterWidth - usedWidth) / 2;
+          const childRowStartX = clusterX + (clusterWidth - usedWidth) / 2;
 
           return {
             id: `pv-${systemIndex}-${childIndex}`,
@@ -1318,7 +1340,7 @@ export class AdvancedPowerFlowCard extends LitElement {
             sub: this._pvSub(child),
             entity: child.power,
             kind: "pv",
-            x: rowStartX + col * (childW + childGapX),
+            x: childRowStartX + col * (childW + childGapX),
             y: pvY + clusterPadY + row * (childH + childGapY),
             w: childW,
             h: childH,
@@ -1327,18 +1349,20 @@ export class AdvancedPowerFlowCard extends LitElement {
           };
         });
 
-        pvClusters.push({
+        rowLayouts.push({
           system,
           systemIndex,
           x: clusterX,
           y: pvY,
           width: clusterWidth,
-          height: rowHeight,
+          height: clusterHeight,
           parent,
           children: childNodes
         });
       });
 
+      pvClusters.push(...rowLayouts);
+      const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
       pvY += rowHeight + pvGapY;
     }
 
@@ -1494,10 +1518,12 @@ export class AdvancedPowerFlowCard extends LitElement {
       });
     });
 
-    const bottomStartY = centerY + center.h + 68;
+    const bottomStartY = centerY + center.h + 74;
     const bottomColumns = Math.min(3, Math.max(1, bottomSpecs.length));
     const bottomGapX = 18 * densityFactor;
-    const bottomGapY = 18 * densityFactor;
+    // Extra vertical lane space is deliberate: all consumer/storage lines are
+    // routed through side buses above the nodes rather than diagonally through them.
+    const bottomGapY = 34 * densityFactor;
     const cellW = (width - sideMargin * 2 - Math.max(0, bottomColumns - 1) * bottomGapX) / bottomColumns;
     const bottomRowH = 94 * sizeFactor;
 
@@ -1552,10 +1578,13 @@ export class AdvancedPowerFlowCard extends LitElement {
 
   private _heatPumpSummary(hp: HeatPumpConfig): string {
     const parts: string[] = [];
-    const flow = this._number(hp.flow_temperature);
-    if (flow !== undefined) {
-      const unit = this._unit(hp.flow_temperature) || "°C";
-      parts.push(`VL ${flow.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`);
+    const temperatureEntity = hp.display_temperature ?? hp.flow_temperature;
+    const temperature = this._number(temperatureEntity);
+    if (temperature !== undefined) {
+      const unit = this._unit(temperatureEntity) || "°C";
+      const fallbackLabel = hp.display_temperature ? "Temp" : "VL";
+      const label = (hp.display_temperature_label?.trim() || fallbackLabel).slice(0, 8);
+      parts.push(`${label} ${temperature.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`);
     }
     const copInfo = this._heatPumpCopInfo(hp);
     if (copInfo.value !== undefined) {
@@ -1770,6 +1799,20 @@ export class AdvancedPowerFlowCard extends LitElement {
     const y2 = to.y + to.h / 2;
     const mid = (x1 + x2) / 2;
     return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+  }
+
+  private _bottomBusPath(from: DiagramNode, to: DiagramNode, source: "center" | "house", width: number): string {
+    const x1 = from.x + from.w / 2;
+    const y1 = from.y + from.h;
+    const x2 = to.x + to.w / 2;
+    const y2 = to.y;
+    const busX = source === "house" ? width - 22 : 22;
+    const departureY = y1 + 26;
+    const targetLaneY = Math.max(departureY + 8, y2 - 18);
+
+    // Dedicated side buses keep branch lines out of all lower nodes. The
+    // horizontal branch always runs in the free lane directly above its target.
+    return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
   }
 
   private _detailItem(label: string, entity?: string, fallbackUnit = "") {
@@ -2322,6 +2365,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
   private _heatDetails(hp: HeatPumpConfig) {
     const hasAny = [
+      hp.display_temperature,
       hp.flow_temperature,
       hp.return_temperature,
       hp.outdoor_temperature,
@@ -2350,6 +2394,9 @@ export class AdvancedPowerFlowCard extends LitElement {
         ${hasAny
           ? html`
             <div class="detail-grid">
+              ${hp.display_temperature && hp.display_temperature !== hp.flow_temperature
+                ? this._detailItem(hp.display_temperature_label?.trim() || "Diagrammtemperatur", hp.display_temperature, "°C")
+                : nothing}
               ${this._detailItem("Vorlauf", hp.flow_temperature, "°C")}
               ${this._detailItem("Rücklauf", hp.return_temperature, "°C")}
               ${this._detailItem("Außentemperatur", hp.outdoor_temperature, "°C")}
@@ -2437,7 +2484,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     return html`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -2558,13 +2605,10 @@ export class AdvancedPowerFlowCard extends LitElement {
 
             ${layout.bottom.map((item) => {
               const source = item.source === "house" ? layout.house : layout.center;
-              const path = this._connectionPath(source, item.node);
-              const direction = item.source === "house"
-                ? item.direction
-                : item.direction;
+              const path = this._bottomBusPath(source, item.node, item.source, layout.width);
               return this._flowPath(
                 path,
-                direction,
+                item.direction,
                 item.numericPower ?? this._powerW(item.power),
                 item.node.id,
                 [source.id, item.node.id]
@@ -2794,6 +2838,7 @@ export class AdvancedPowerFlowCard extends LitElement {
       stroke: var(--apfc-line);
       stroke-width: 7;
       stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .flow {
@@ -2801,6 +2846,7 @@ export class AdvancedPowerFlowCard extends LitElement {
       stroke: var(--apfc-flow);
       stroke-width: 3.8;
       stroke-linecap: round;
+      stroke-linejoin: round;
       stroke-dasharray: 8 14;
       opacity: .98;
       filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--apfc-flow) 42%, transparent));

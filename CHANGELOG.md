@@ -1,3 +1,12 @@
+## 0.3.1
+
+- Fixed empty placeholder space above PV-system totals when a PV system has no configured MPPT/sub-PV inputs.
+- Added `pv_layout`: `expanded`, `compact` and `auto`. Compact mode shows only PV-system totals in the live diagram while keeping full MPPT drill-down on click.
+- Auto PV layout switches to compact mode when four or more PV systems are configured.
+- Added optional `display_temperature` and `display_temperature_label` for showing a selected heat-pump temperature directly in the live node; falls back to flow temperature when omitted.
+- Reworked battery/consumer/heat-pump power-flow routing to use dedicated side buses and free lanes above node rows, preventing lines from running through other boxes.
+- Increased vertical lane spacing for multiple lower consumers so larger setups remain readable.
+
 ## 0.3.0
 
 - Added a second Lovelace card, `custom:energy-analytics-card`, to the same HACS package.

@@ -126,6 +126,10 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
       raw.layout_density === "compact" || raw.layout_density === "comfortable" || raw.layout_density === "auto"
         ? raw.layout_density
         : "auto",
+    pv_layout:
+      raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "auto"
+        ? raw.pv_layout
+        : "auto",
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
         ? raw.daily_layout
@@ -176,7 +180,9 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
       compressor_frequency: "sensor.heatpump_compressor_frequency",
       thermal_power: "sensor.heatpump_thermal_power",
       cop: "sensor.heatpump_cop",
-      daily_energy: "sensor.heatpump_daily_energy"
+      daily_energy: "sensor.heatpump_daily_energy",
+      display_temperature: "sensor.heatpump_flow_temperature",
+      display_temperature_label: "VL"
     },
     consumers: [],
     daily: {},
@@ -196,6 +202,7 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     text_size: "large",
     mobile_scale: 1.06,
     layout_density: "auto",
+    pv_layout: "auto",
     daily_layout: "cards",
     night_mode: true
   };

@@ -651,6 +651,7 @@ function normalizeConfig(input) {
 		text_size: raw.text_size === "small" || raw.text_size === "large" || raw.text_size === "normal" || raw.text_size === "xlarge" ? raw.text_size : "large",
 		mobile_scale: typeof raw.mobile_scale === "number" && Number.isFinite(raw.mobile_scale) ? Math.min(1.3, Math.max(.9, raw.mobile_scale)) : 1.06,
 		layout_density: raw.layout_density === "compact" || raw.layout_density === "comfortable" || raw.layout_density === "auto" ? raw.layout_density : "auto",
+		pv_layout: raw.pv_layout === "expanded" || raw.pv_layout === "compact" || raw.pv_layout === "auto" ? raw.pv_layout : "auto",
 		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
 		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
 	};
@@ -729,7 +730,9 @@ function createStubConfig() {
 			compressor_frequency: "sensor.heatpump_compressor_frequency",
 			thermal_power: "sensor.heatpump_thermal_power",
 			cop: "sensor.heatpump_cop",
-			daily_energy: "sensor.heatpump_daily_energy"
+			daily_energy: "sensor.heatpump_daily_energy",
+			display_temperature: "sensor.heatpump_flow_temperature",
+			display_temperature_label: "VL"
 		},
 		consumers: [],
 		daily: {},
@@ -749,6 +752,7 @@ function createStubConfig() {
 		text_size: "large",
 		mobile_scale: 1.06,
 		layout_density: "auto",
+		pv_layout: "auto",
 		daily_layout: "cards",
 		night_mode: true
 	};
@@ -975,6 +979,23 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		], (value) => this._with((config) => {
 			config.layout_density = value;
 		}))}
+          ${this._selectInput("PV-Darstellung", this._config.pv_layout, [
+			{
+				value: "auto",
+				label: "Automatisch (bei vielen Anlagen kompakt)"
+			},
+			{
+				value: "expanded",
+				label: "Immer vollständig mit MPPTs"
+			},
+			{
+				value: "compact",
+				label: "Kompakt – nur PV-Gesamtsysteme"
+			}
+		], (value) => this._with((config) => {
+			config.pv_layout = value;
+		}))}
+          <div class="help">Im kompakten PV-Modus bleiben die MPPTs im Hauptdiagramm ausgeblendet. Ein Klick auf das PV-Gesamtsystem öffnet weiterhin die vollständige MPPT-Detailansicht.</div>
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
 			{
@@ -1388,6 +1409,9 @@ var AdvancedPowerFlowCardEditor = class extends i {
             ${this._entityPicker("Elektrische Leistung", this._config.heat_pump?.power, (value) => this._updateHeatPump({ power: value }))}
             ${this._checkbox("Teil des Hausverbrauchs", this._config.heat_pump?.part_of_house, true, (value) => this._updateHeatPump({ part_of_house: value }))}
             ${this._checkbox("Details standardmäßig geöffnet", this._config.heat_pump?.details_expanded_by_default, false, (value) => this._updateHeatPump({ details_expanded_by_default: value }))}
+            ${this._entityPicker("Temperatur direkt im Energiefluss (optional)", this._config.heat_pump?.display_temperature, (value) => this._updateHeatPump({ display_temperature: value }))}
+            ${this._textInput("Kurzlabel für Diagrammtemperatur", this._config.heat_pump?.display_temperature_label, "Temp", (value) => this._updateHeatPump({ display_temperature_label: value }))}
+            <div class="help">Wenn keine separate Diagrammtemperatur gesetzt ist, verwendet die Card automatisch die Vorlauftemperatur. Beispiel: „VL 34,5 °C · COP 3,8“.</div>
             ${this._entityPicker("Vorlauftemperatur", this._config.heat_pump?.flow_temperature, (value) => this._updateHeatPump({ flow_temperature: value }))}
             ${this._entityPicker("Rücklauftemperatur", this._config.heat_pump?.return_temperature, (value) => this._updateHeatPump({ return_temperature: value }))}
             ${this._entityPicker("Außentemperatur", this._config.heat_pump?.outdoor_temperature, (value) => this._updateHeatPump({ outdoor_temperature: value }))}
@@ -1524,7 +1548,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME$1 = "Advanced Power Flow Card";
-var CARD_VERSION$1 = "0.3.0";
+var CARD_VERSION$1 = "0.3.1";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -2388,53 +2412,63 @@ var AdvancedPowerFlowCard = class extends i {
 		if (value.length <= max) return value;
 		return `${value.slice(0, max - 1)}…`;
 	}
+	_compactPvLayout() {
+		const mode = this._config.pv_layout ?? "auto";
+		if (mode === "compact") return true;
+		if (mode === "expanded") return false;
+		return (this._config.solar ?? []).length >= 4;
+	}
 	_layout() {
 		const solar = this._config.solar ?? [];
 		const batteries = this._config.batteries ?? [];
 		const consumers = this._config.consumers ?? [];
-		Boolean(this._config.heat_pump);
+		const compactPv = this._compactPvLayout();
 		const width = 1e3;
 		const density = this._config.layout_density ?? "auto";
 		const densityFactor = density === "compact" ? .84 : density === "comfortable" ? 1.14 : 1;
 		const sizeFactor = this._config.text_size === "xlarge" ? 1.08 : 1;
 		const sideMargin = 28 * densityFactor;
-		const pvGapX = 20 * densityFactor;
-		const pvGapY = 20 * densityFactor;
-		const pvColumns = solar.length <= 1 ? 1 : 2;
-		const clusterWidth = pvColumns === 1 ? 620 : (width - sideMargin * 2 - pvGapX) / 2;
+		const pvGapX = (compactPv ? 12 : 20) * densityFactor;
+		const pvGapY = (compactPv ? 12 : 20) * densityFactor;
+		const pvColumns = compactPv ? solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2 : solar.length <= 1 ? 1 : 2;
+		const clusterWidth = pvColumns === 1 ? 620 : (width - sideMargin * 2 - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
 		const childGapX = 12 * densityFactor;
 		const childGapY = 10 * densityFactor;
 		const childH = 78 * sizeFactor;
-		const parentMaxW = this._config.text_size === "xlarge" ? 450 : 430;
-		const parentH = 86 * sizeFactor;
-		const clusterPadX = 18 * densityFactor;
-		const clusterPadY = 18 * densityFactor;
+		const parentMaxW = compactPv ? Math.min(300, clusterWidth - 20) : this._config.text_size === "xlarge" ? 450 : 430;
+		const parentH = (compactPv ? 80 : 86) * sizeFactor;
+		const clusterPadX = (compactPv ? 10 : 18) * densityFactor;
+		const clusterPadY = (compactPv ? 10 : 18) * densityFactor;
 		const pvClusters = [];
 		let pvY = 18;
 		for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
 			const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
-			const maxChildren = Math.max(1, ...rowSystems.map((system) => Math.max(1, system.children?.length ?? 0)));
-			const maxChildRows = Math.ceil(maxChildren / 2);
-			const childrenAreaH = maxChildRows * childH + Math.max(0, maxChildRows - 1) * childGapY;
-			const rowHeight = clusterPadY + childrenAreaH + 16 + parentH + clusterPadY;
+			const rowLayouts = [];
 			rowSystems.forEach((system, localIndex) => {
 				const systemIndex = rowStart + localIndex;
-				const clusterX = rowSystems.length === 1 ? (width - clusterWidth) / 2 : sideMargin + localIndex * (clusterWidth + pvGapX);
-				const children = system.children ?? [];
+				const rowCount = rowSystems.length;
+				const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
+				const clusterX = (width - rowWidth) / 2 + localIndex * (clusterWidth + pvGapX);
+				const children = compactPv ? [] : system.children ?? [];
 				const childColumns = Math.min(2, Math.max(1, children.length));
+				const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
+				const childrenAreaH = childRows ? childRows * childH + Math.max(0, childRows - 1) * childGapY : 0;
+				const childParentGap = children.length ? 14 * densityFactor : 0;
+				const clusterHeight = clusterPadY + childrenAreaH + childParentGap + parentH + clusterPadY;
 				const childW = childColumns === 1 ? Math.min(220, clusterWidth - clusterPadX * 2) : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
 				const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
 				const parentX = clusterX + clusterWidth / 2 - parentW / 2;
-				const parentY = pvY + clusterPadY + childrenAreaH + 16;
+				const parentY = pvY + clusterPadY + childrenAreaH + childParentGap;
 				const parentPower = this._pvSystemPowerW(system);
 				const systemWarnings = this._pvSystemWarnings(system);
 				const totalPv = this._totalPvW();
 				const pvShare = parentPower !== void 0 && totalPv !== void 0 && totalPv > this._threshold() ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100) : void 0;
+				const configuredChildren = system.children?.length ?? 0;
 				const parent = {
 					id: `pv-system-${systemIndex}`,
 					title: system.name ?? `PV ${systemIndex + 1}`,
 					main: this._formatW(parentPower, true),
-					sub: children.length ? `${children.length} MPPT${children.length === 1 ? "" : "s"}` : "PV-System",
+					sub: configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
 					entity: system.power,
 					kind: "pv-parent",
 					x: parentX,
@@ -2452,7 +2486,7 @@ var AdvancedPowerFlowCard = class extends i {
 					const col = childIndex % childColumns;
 					const itemsInThisRow = Math.min(childColumns, children.length - row * childColumns);
 					const usedWidth = itemsInThisRow * childW + Math.max(0, itemsInThisRow - 1) * childGapX;
-					const rowStartX = clusterX + (clusterWidth - usedWidth) / 2;
+					const childRowStartX = clusterX + (clusterWidth - usedWidth) / 2;
 					return {
 						id: `pv-${systemIndex}-${childIndex}`,
 						title: child.name ?? `MPPT ${childIndex + 1}`,
@@ -2460,7 +2494,7 @@ var AdvancedPowerFlowCard = class extends i {
 						sub: this._pvSub(child),
 						entity: child.power,
 						kind: "pv",
-						x: rowStartX + col * (childW + childGapX),
+						x: childRowStartX + col * (childW + childGapX),
 						y: pvY + clusterPadY + row * (childH + childGapY),
 						w: childW,
 						h: childH,
@@ -2468,17 +2502,19 @@ var AdvancedPowerFlowCard = class extends i {
 						warning: Boolean(this._mpptDiagnostic(system, child, childIndex))
 					};
 				});
-				pvClusters.push({
+				rowLayouts.push({
 					system,
 					systemIndex,
 					x: clusterX,
 					y: pvY,
 					width: clusterWidth,
-					height: rowHeight,
+					height: clusterHeight,
 					parent,
 					children: childNodes
 				});
 			});
+			pvClusters.push(...rowLayouts);
+			const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
 			pvY += rowHeight + pvGapY;
 		}
 		if (!solar.length) pvY = 24;
@@ -2608,10 +2644,10 @@ var AdvancedPowerFlowCard = class extends i {
 				})
 			});
 		});
-		const bottomStartY = centerY + center.h + 68;
+		const bottomStartY = centerY + center.h + 74;
 		const bottomColumns = Math.min(3, Math.max(1, bottomSpecs.length));
 		const bottomGapX = 18 * densityFactor;
-		const bottomGapY = 18 * densityFactor;
+		const bottomGapY = 34 * densityFactor;
 		const cellW = (width - sideMargin * 2 - Math.max(0, bottomColumns - 1) * bottomGapX) / bottomColumns;
 		const bottomRowH = 94 * sizeFactor;
 		bottomSpecs.forEach((spec, index) => {
@@ -2661,10 +2697,13 @@ var AdvancedPowerFlowCard = class extends i {
 	}
 	_heatPumpSummary(hp) {
 		const parts = [];
-		const flow = this._number(hp.flow_temperature);
-		if (flow !== void 0) {
-			const unit = this._unit(hp.flow_temperature) || "°C";
-			parts.push(`VL ${flow.toLocaleString(void 0, { maximumFractionDigits: 1 })} ${unit}`);
+		const temperatureEntity = hp.display_temperature ?? hp.flow_temperature;
+		const temperature = this._number(temperatureEntity);
+		if (temperature !== void 0) {
+			const unit = this._unit(temperatureEntity) || "°C";
+			const fallbackLabel = hp.display_temperature ? "Temp" : "VL";
+			const label = (hp.display_temperature_label?.trim() || fallbackLabel).slice(0, 8);
+			parts.push(`${label} ${temperature.toLocaleString(void 0, { maximumFractionDigits: 1 })} ${unit}`);
 		}
 		const copInfo = this._heatPumpCopInfo(hp);
 		if (copInfo.value !== void 0) parts.push(`COP ${copInfo.value.toLocaleString(void 0, { maximumFractionDigits: 1 })}${copInfo.calculated ? "*" : ""}`);
@@ -2848,6 +2887,16 @@ var AdvancedPowerFlowCard = class extends i {
 		const y2 = to.y + to.h / 2;
 		const mid = (x1 + x2) / 2;
 		return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+	}
+	_bottomBusPath(from, to, source, width) {
+		const x1 = from.x + from.w / 2;
+		const y1 = from.y + from.h;
+		const x2 = to.x + to.w / 2;
+		const y2 = to.y;
+		const busX = source === "house" ? width - 22 : 22;
+		const departureY = y1 + 26;
+		const targetLaneY = Math.max(departureY + 8, y2 - 18);
+		return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
 	}
 	_detailItem(label, entity, fallbackUnit = "") {
 		if (!entity) return A;
@@ -3255,6 +3304,7 @@ var AdvancedPowerFlowCard = class extends i {
 	}
 	_heatDetails(hp) {
 		const hasAny = [
+			hp.display_temperature,
 			hp.flow_temperature,
 			hp.return_temperature,
 			hp.outdoor_temperature,
@@ -3283,6 +3333,7 @@ var AdvancedPowerFlowCard = class extends i {
         </div>
         ${hasAny ? b`
             <div class="detail-grid">
+              ${hp.display_temperature && hp.display_temperature !== hp.flow_temperature ? this._detailItem(hp.display_temperature_label?.trim() || "Diagrammtemperatur", hp.display_temperature, "°C") : A}
               ${this._detailItem("Vorlauf", hp.flow_temperature, "°C")}
               ${this._detailItem("Rücklauf", hp.return_temperature, "°C")}
               ${this._detailItem("Außentemperatur", hp.outdoor_temperature, "°C")}
@@ -3380,7 +3431,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -3479,9 +3530,8 @@ var AdvancedPowerFlowCard = class extends i {
 
             ${layout.bottom.map((item) => {
 			const source = item.source === "house" ? layout.house : layout.center;
-			const path = this._connectionPath(source, item.node);
-			const direction = item.source === "house" ? item.direction : item.direction;
-			return this._flowPath(path, direction, item.numericPower ?? this._powerW(item.power), item.node.id, [source.id, item.node.id]);
+			const path = this._bottomBusPath(source, item.node, item.source, layout.width);
+			return this._flowPath(path, item.direction, item.numericPower ?? this._powerW(item.power), item.node.id, [source.id, item.node.id]);
 		})}
 
             ${layout.pvClusters.map((cluster) => w`
@@ -3693,6 +3743,7 @@ var AdvancedPowerFlowCard = class extends i {
       stroke: var(--apfc-line);
       stroke-width: 7;
       stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .flow {
@@ -3700,6 +3751,7 @@ var AdvancedPowerFlowCard = class extends i {
       stroke: var(--apfc-flow);
       stroke-width: 3.8;
       stroke-linecap: round;
+      stroke-linejoin: round;
       stroke-dasharray: 8 14;
       opacity: .98;
       filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--apfc-flow) 42%, transparent));
@@ -4668,7 +4720,7 @@ if (!customElements.get("energy-analytics-card-editor")) customElements.define("
 //#endregion
 //#region src/energy-analytics-card.ts
 var CARD_NAME = "Energy Analytics Card";
-var CARD_VERSION = "0.3.0";
+var CARD_VERSION = "0.3.1";
 function clamp(value, min, max) {
 	return Math.min(max, Math.max(min, value));
 }
