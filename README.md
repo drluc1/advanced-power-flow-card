@@ -340,3 +340,34 @@ Bei `pv_detail_level: compact` bleiben die MPPT-Leistungen im Hauptdiagramm sich
 Wenn `status:` und `installed_kwp:` für ein PV-System konfiguriert sind, kann die Hauptansicht zusätzlich Betriebsstatus und momentane spezifische Leistung in `W/kWp` anzeigen.
 
 Mit `supply_node: hidden` bleibt nur ein kleiner zentraler Verteilerpunkt. `compact` zeigt einen kleineren Versorgungsknoten; `full` entspricht der bisherigen Darstellung.
+
+
+## v0.3.4 – mobile Flussanimation & Clean-Layout
+
+Die Live-Card nutzt für die animierten Energieflüsse jetzt SVG/SMIL statt CSS-Keyframes. Das ist in Home-Assistant-WebViews auf Android/Tablet deutlich robuster.
+
+```yaml
+flow_animation: always
+flow_routing: curved
+visual_style: clean
+show_legend: true
+show_version: true
+```
+
+`flow_animation`:
+
+- `always`: Animation unabhängig von der Geräteoption „reduzierte Bewegung“ ausführen
+- `system`: Systemeinstellung respektieren
+- `off`: Flussanimation abschalten
+
+`flow_routing`:
+
+- `curved`: sichere seitliche Busführung mit weichen Bezier-Kurven
+- `orthogonal`: klassische rechtwinklige Busführung
+
+`visual_style`:
+
+- `clean`: weniger Schatten, dünnere Rahmen und ruhigere Verbindungslinien
+- `classic`: bisheriger kräftigerer Stil
+
+Legende und Versionsnummer können bei besonders kompakten Dashboards separat ausgeblendet werden.

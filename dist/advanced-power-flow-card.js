@@ -659,6 +659,11 @@ function normalizeConfig(input) {
 		night_pv_collapse: typeof raw.night_pv_collapse === "boolean" ? raw.night_pv_collapse : true,
 		battery_layout: raw.battery_layout === "separate" || raw.battery_layout === "grouped" ? raw.battery_layout : "grouped",
 		supply_node: raw.supply_node === "compact" || raw.supply_node === "hidden" || raw.supply_node === "full" ? raw.supply_node : "full",
+		flow_animation: raw.flow_animation === "system" || raw.flow_animation === "off" || raw.flow_animation === "always" ? raw.flow_animation : "always",
+		flow_routing: raw.flow_routing === "orthogonal" || raw.flow_routing === "curved" ? raw.flow_routing : "curved",
+		visual_style: raw.visual_style === "classic" || raw.visual_style === "clean" ? raw.visual_style : "clean",
+		show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
+		show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
 		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
 		daily_items: Array.isArray(raw.daily_items) ? raw.daily_items.filter((value) => typeof value === "string") : void 0,
 		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
@@ -768,6 +773,11 @@ function createStubConfig() {
 		night_pv_collapse: true,
 		battery_layout: "grouped",
 		supply_node: "full",
+		flow_animation: "always",
+		flow_routing: "curved",
+		visual_style: "clean",
+		show_legend: true,
+		show_version: true,
 		daily_layout: "cards",
 		night_mode: true
 	};
@@ -1071,6 +1081,46 @@ var AdvancedPowerFlowCardEditor = class extends i {
 			}
 		], (value) => this._with((config) => {
 			config.supply_node = value;
+		}))}
+          ${this._selectInput("Flussanimation", this._config.flow_animation, [
+			{
+				value: "always",
+				label: "Immer animieren – empfohlen"
+			},
+			{
+				value: "system",
+				label: "Systemeinstellung für reduzierte Bewegung beachten"
+			},
+			{
+				value: "off",
+				label: "Aus"
+			}
+		], (value) => this._with((config) => {
+			config.flow_animation = value;
+		}))}
+          ${this._selectInput("Leitungsführung unten", this._config.flow_routing, [{
+			value: "curved",
+			label: "Kurvig – empfohlen"
+		}, {
+			value: "orthogonal",
+			label: "Rechtwinklig / Bus"
+		}], (value) => this._with((config) => {
+			config.flow_routing = value;
+		}))}
+          ${this._selectInput("Optischer Stil", this._config.visual_style, [{
+			value: "clean",
+			label: "Clean – ruhiger und reduzierter"
+		}, {
+			value: "classic",
+			label: "Classic – stärkere Konturen/Schatten"
+		}], (value) => this._with((config) => {
+			config.visual_style = value;
+		}))}
+          ${this._checkbox("Legende anzeigen", this._config.show_legend, true, (value) => this._with((config) => {
+			config.show_legend = value;
+		}))}
+          ${this._checkbox("Versionsnummer anzeigen", this._config.show_version, true, (value) => this._with((config) => {
+			config.show_version = value;
 		}))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
@@ -1629,7 +1679,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME$1 = "Advanced Power Flow Card";
-var CARD_VERSION$1 = "0.3.3";
+var CARD_VERSION$1 = "0.3.4";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -2953,18 +3003,40 @@ var AdvancedPowerFlowCard = class extends i {
 		if (copInfo.value !== void 0) parts.push(`COP ${copInfo.value.toLocaleString(void 0, { maximumFractionDigits: 1 })}${copInfo.calculated ? "*" : ""}`);
 		return parts.length ? parts.join(" · ") : "Details anzeigen";
 	}
+	_flowAnimationEnabled() {
+		const mode = this._config.flow_animation ?? "always";
+		if (mode === "off") return false;
+		if (mode === "system") try {
+			return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+		} catch {
+			return true;
+		}
+		return true;
+	}
 	_flowPath(d, direction, power, key = "", relatedNodes = []) {
 		const duration = this._durationFromPower(power);
 		const focusClass = this._flowFocusClass(relatedNodes);
+		const animate = direction !== "off" && this._flowAnimationEnabled();
+		const offset = direction === "reverse" ? 50 : -50;
 		return w`
       <path d=${d} class=${`flow-base ${focusClass}`}></path>
       <path
         d=${d}
         class=${`flow ${direction} ${focusClass}`}
-        style=${`--flow-duration:${duration}s`}
         pathLength="100"
         data-key=${key}
-      ></path>
+      >
+        ${animate ? w`
+            <animate
+              attributeName="stroke-dashoffset"
+              from="0"
+              to=${String(offset)}
+              dur=${`${duration}s`}
+              repeatCount="indefinite"
+              calcMode="linear"
+            ></animate>
+          ` : A}
+      </path>
     `;
 	}
 	_node(node) {
@@ -3164,10 +3236,13 @@ var AdvancedPowerFlowCard = class extends i {
 		const y1 = from.y + from.h;
 		const x2 = to.x + to.w / 2;
 		const y2 = to.y;
-		const busX = source === "house" ? width - 22 : 22;
-		const departureY = y1 + 26;
-		const targetLaneY = Math.max(departureY + 8, y2 - 18);
-		return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
+		const busX = source === "house" ? width - 24 : 24;
+		const departureY = y1 + 24;
+		const targetLaneY = Math.max(departureY + 12, y2 - 22);
+		if ((this._config.flow_routing ?? "curved") === "orthogonal") return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
+		const firstControlY = y1 + Math.max(14, (departureY - y1) * .7);
+		const secondControlY = Math.max(departureY + 10, targetLaneY - 16);
+		return `M ${x1} ${y1} C ${x1} ${firstControlY}, ${busX} ${departureY - 8}, ${busX} ${departureY} C ${busX} ${secondControlY}, ${x2} ${targetLaneY - 14}, ${x2} ${y2}`;
 	}
 	_detailItem(label, entity, fallbackUnit = "") {
 		if (!entity) return A;
@@ -3702,7 +3777,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._groupedPvLayout() ? "pv-grouped" : this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} ${this._groupedPvLayout() ? "pv-grouped" : this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -3714,7 +3789,7 @@ var AdvancedPowerFlowCard = class extends i {
               ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
             </div>
           </div>
-          <div class="version">v${CARD_VERSION$1}</div>
+          ${this._config.show_version === false ? A : b`<div class="version">v${CARD_VERSION$1}</div>`}
         </div>
 
         ${dailyItems.length ? b`
@@ -3884,10 +3959,13 @@ var AdvancedPowerFlowCard = class extends i {
           </svg>
         </div>
 
-        <div class="legend">
-          <span><i class="dot active"></i> aktiver Energiefluss</span>
-          <span><i class="dot idle"></i> kein relevanter Fluss</span>
-          ${diagnostics.length ? b`<button class="diagnostic-summary-button" @click=${() => {
+        ${this._config.show_legend !== false || diagnostics.length ? b`
+            <div class=${`legend ${this._config.show_legend === false ? "diagnostics-only" : ""}`}>
+              ${this._config.show_legend === false ? A : b`
+                  <span><i class="dot active"></i> aktiver Energiefluss</span>
+                  <span><i class="dot idle"></i> kein relevanter Fluss</span>
+                `}
+              ${diagnostics.length ? b`<button class="diagnostic-summary-button" @click=${() => {
 			const next = !this._diagnosticsExpanded;
 			this._diagnosticsExpanded = next;
 			if (next) {
@@ -3898,7 +3976,8 @@ var AdvancedPowerFlowCard = class extends i {
 				this._dailyBalanceExpanded = false;
 			}
 		}}>⚠ ${diagnostics.length} Hinweis${diagnostics.length === 1 ? "" : "e"}</button>` : A}
-        </div>
+            </div>
+          ` : A}
 
         ${this._heatExpanded && this._config.heat_pump ? this._heatDetails(this._config.heat_pump) : this._expandedBattery !== void 0 && this._config.batteries?.[this._expandedBattery] ? this._batteryDetails(this._config.batteries[this._expandedBattery], this._expandedBattery) : this._expandedPvSystem !== void 0 && this._config.solar?.[this._expandedPvSystem] ? this._pvSystemDetails(this._config.solar[this._expandedPvSystem], this._expandedPvSystem) : this._pvDailyExpanded ? this._pvDailyDetails() : this._dailyBalanceExpanded ? this._dailyEnergyBalanceDetails() : this._diagnosticsExpanded && diagnostics.length ? this._diagnosticsDetails(diagnostics) : A}
       </ha-card>
@@ -4172,13 +4251,12 @@ var AdvancedPowerFlowCard = class extends i {
       stroke-linecap: round;
       stroke-linejoin: round;
       stroke-dasharray: 8 14;
+      stroke-dashoffset: 0;
       opacity: .98;
       filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--apfc-flow) 42%, transparent));
-      animation: dash var(--flow-duration, 1.35s) linear infinite;
     }
 
-    .flow.reverse { animation-direction: reverse; }
-    .flow.off { opacity: 0; animation: none; }
+    .flow.off { opacity: 0; }
 
     .flow-base,
     .flow {
@@ -4192,10 +4270,6 @@ var AdvancedPowerFlowCard = class extends i {
       opacity: 1;
       stroke-width: 4.8;
       filter: drop-shadow(0 0 3px color-mix(in srgb, var(--apfc-flow) 58%, transparent));
-    }
-
-    @keyframes dash {
-      to { stroke-dashoffset: -50; }
     }
 
     .node-bg {
@@ -4406,6 +4480,46 @@ var AdvancedPowerFlowCard = class extends i {
       padding-top: 8px;
       color: var(--secondary-text-color);
       font-size: 12px;
+    }
+
+    .legend.diagnostics-only {
+      justify-content: flex-end;
+      padding-top: 3px;
+    }
+
+    /* Ruhigerer Stil: weniger Rahmen, Schatten und visuelles Gewicht. */
+    ha-card.visual-clean .node-bg {
+      filter: none;
+      stroke-width: 1.1;
+    }
+
+    ha-card.visual-clean .node.active .node-bg {
+      stroke-width: 1.35;
+      filter: none;
+    }
+
+    ha-card.visual-clean .flow-base {
+      stroke-width: 5.2;
+      opacity: .72;
+    }
+
+    ha-card.visual-clean .flow {
+      stroke-width: 3.1;
+      filter: none;
+    }
+
+    ha-card.visual-clean .cluster-bg,
+    ha-card.visual-clean .pv-group-bg,
+    ha-card.visual-clean .diagram-group-bg {
+      stroke-width: .9;
+    }
+
+    ha-card.visual-clean .node.idle:not(.warning) {
+      opacity: .72;
+    }
+
+    ha-card.visual-clean .node.unavailable:not(.warning) {
+      opacity: .48;
     }
 
     .legend span {
@@ -4854,9 +4968,6 @@ var AdvancedPowerFlowCard = class extends i {
       .battery-fleet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .flow { animation: none; }
-    }
   `;
 	}
 };

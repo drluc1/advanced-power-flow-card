@@ -120,6 +120,9 @@ export type PvLayoutMode = "auto" | "expanded" | "compact" | "grouped";
 export type PvDetailLevel = "auto" | "minimal" | "compact" | "full";
 export type SupplyNodeMode = "full" | "compact" | "hidden";
 export type BatteryLayoutMode = "grouped" | "separate";
+export type FlowAnimationMode = "always" | "system" | "off";
+export type FlowRoutingMode = "curved" | "orthogonal";
+export type VisualStyle = "clean" | "classic";
 export type DailyItemKey =
   | "pv"
   | "grid-import"
@@ -180,6 +183,11 @@ export interface AdvancedPowerFlowCardConfig {
   supply_node?: SupplyNodeMode;
   daily_layout?: DailyLayout;
   daily_items?: DailyItemKey[];
+  flow_animation?: FlowAnimationMode;
+  flow_routing?: FlowRoutingMode;
+  visual_style?: VisualStyle;
+  show_legend?: boolean;
+  show_version?: boolean;
   night_mode?: boolean;
 }
 

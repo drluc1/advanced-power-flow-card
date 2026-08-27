@@ -140,6 +140,20 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     night_pv_collapse: typeof raw.night_pv_collapse === "boolean" ? raw.night_pv_collapse : true,
     battery_layout: raw.battery_layout === "separate" || raw.battery_layout === "grouped" ? raw.battery_layout : "grouped",
     supply_node: raw.supply_node === "compact" || raw.supply_node === "hidden" || raw.supply_node === "full" ? raw.supply_node : "full",
+    flow_animation:
+      raw.flow_animation === "system" || raw.flow_animation === "off" || raw.flow_animation === "always"
+        ? raw.flow_animation
+        : "always",
+    flow_routing:
+      raw.flow_routing === "orthogonal" || raw.flow_routing === "curved"
+        ? raw.flow_routing
+        : "curved",
+    visual_style:
+      raw.visual_style === "classic" || raw.visual_style === "clean"
+        ? raw.visual_style
+        : "clean",
+    show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
+    show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
         ? raw.daily_layout
@@ -223,6 +237,11 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     night_pv_collapse: true,
     battery_layout: "grouped",
     supply_node: "full",
+    flow_animation: "always",
+    flow_routing: "curved",
+    visual_style: "clean",
+    show_legend: true,
+    show_version: true,
     daily_layout: "cards",
     night_mode: true
   };

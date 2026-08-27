@@ -230,6 +230,21 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             { value: "compact", label: "Kompakt" },
             { value: "hidden", label: "Nur Verteilerpunkt" }
           ], (value) => this._with((config) => { config.supply_node = value as "full" | "compact" | "hidden"; }))}
+          ${this._selectInput("Flussanimation", this._config.flow_animation, [
+            { value: "always", label: "Immer animieren – empfohlen" },
+            { value: "system", label: "Systemeinstellung für reduzierte Bewegung beachten" },
+            { value: "off", label: "Aus" }
+          ], (value) => this._with((config) => { config.flow_animation = value as "always" | "system" | "off"; }))}
+          ${this._selectInput("Leitungsführung unten", this._config.flow_routing, [
+            { value: "curved", label: "Kurvig – empfohlen" },
+            { value: "orthogonal", label: "Rechtwinklig / Bus" }
+          ], (value) => this._with((config) => { config.flow_routing = value as "curved" | "orthogonal"; }))}
+          ${this._selectInput("Optischer Stil", this._config.visual_style, [
+            { value: "clean", label: "Clean – ruhiger und reduzierter" },
+            { value: "classic", label: "Classic – stärkere Konturen/Schatten" }
+          ], (value) => this._with((config) => { config.visual_style = value as "clean" | "classic"; }))}
+          ${this._checkbox("Legende anzeigen", this._config.show_legend, true, (value) => this._with((config) => { config.show_legend = value; }))}
+          ${this._checkbox("Versionsnummer anzeigen", this._config.show_version, true, (value) => this._with((config) => { config.show_version = value; }))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },

@@ -13,6 +13,11 @@ pv_compact_mppt_bars: true
 night_pv_collapse: true
 battery_layout: grouped
 supply_node: full
+flow_animation: always
+flow_routing: curved
+visual_style: clean
+show_legend: true
+show_version: true
 daily_items:
   - pv
   - house

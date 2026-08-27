@@ -1,3 +1,12 @@
+## 0.3.4
+
+- Energieflussanimation von CSS-Keyframes auf SVG/SMIL umgestellt; behebt feststehende Dash-Animationen in vielen Android-/Tablet-WebViews.
+- Neue `flow_animation`-Option: `always`, `system`, `off`.
+- Untere Batterie-/Verbraucherleitungen standardmäßig als weiche Bezier-Kurven; rechtwinklige Busführung bleibt optional.
+- Neuer `visual_style: clean | classic`; `clean` reduziert Rahmen, Schatten und visuelles Gewicht.
+- Legende und Versionsnummer können separat ausgeblendet werden.
+- Alle neuen Optionen sind im grafischen Editor verfügbar und rückwärtskompatibel.
+
 ## 0.3.3
 
 - Gruppierte Batteriezone für mehrere Speicher.

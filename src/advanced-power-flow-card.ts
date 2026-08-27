@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.3";
+const CARD_VERSION = "0.3.4";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -1851,6 +1851,19 @@ export class AdvancedPowerFlowCard extends LitElement {
     return parts.length ? parts.join(" · ") : "Details anzeigen";
   }
 
+  private _flowAnimationEnabled(): boolean {
+    const mode = this._config.flow_animation ?? "always";
+    if (mode === "off") return false;
+    if (mode === "system") {
+      try {
+        return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      } catch {
+        return true;
+      }
+    }
+    return true;
+  }
+
   private _flowPath(
     d: string,
     direction: FlowDirection,
@@ -1860,15 +1873,34 @@ export class AdvancedPowerFlowCard extends LitElement {
   ) {
     const duration = this._durationFromPower(power);
     const focusClass = this._flowFocusClass(relatedNodes);
+    const animate = direction !== "off" && this._flowAnimationEnabled();
+    const offset = direction === "reverse" ? 50 : -50;
+
+    // SVG/SMIL animation is deliberately used instead of CSS keyframes here.
+    // It is substantially more reliable inside Home Assistant's SVG/Lit cards
+    // on Android/WebView/tablet browsers, where CSS dash animations may be
+    // frozen even though the line itself renders correctly.
     return svg`
       <path d=${d} class=${`flow-base ${focusClass}`}></path>
       <path
         d=${d}
         class=${`flow ${direction} ${focusClass}`}
-        style=${`--flow-duration:${duration}s`}
         pathLength="100"
         data-key=${key}
-      ></path>
+      >
+        ${animate
+          ? svg`
+            <animate
+              attributeName="stroke-dashoffset"
+              from="0"
+              to=${String(offset)}
+              dur=${`${duration}s`}
+              repeatCount="indefinite"
+              calcMode="linear"
+            ></animate>
+          `
+          : nothing}
+      </path>
     `;
   }
 
@@ -2097,13 +2129,20 @@ export class AdvancedPowerFlowCard extends LitElement {
     const y1 = from.y + from.h;
     const x2 = to.x + to.w / 2;
     const y2 = to.y;
-    const busX = source === "house" ? width - 22 : 22;
-    const departureY = y1 + 26;
-    const targetLaneY = Math.max(departureY + 8, y2 - 18);
+    const busX = source === "house" ? width - 24 : 24;
+    const departureY = y1 + 24;
+    const targetLaneY = Math.max(departureY + 12, y2 - 22);
 
-    // Dedicated side buses keep branch lines out of all lower nodes. The
-    // horizontal branch always runs in the free lane directly above its target.
-    return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
+    if ((this._config.flow_routing ?? "curved") === "orthogonal") {
+      return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
+    }
+
+    // Keep the safe side-bus concept, but round the whole branch into two
+    // broad Bezier curves. This retains clearance around grouped nodes while
+    // looking much less like wiring-diagram right angles.
+    const firstControlY = y1 + Math.max(14, (departureY - y1) * 0.7);
+    const secondControlY = Math.max(departureY + 10, targetLaneY - 16);
+    return `M ${x1} ${y1} C ${x1} ${firstControlY}, ${busX} ${departureY - 8}, ${busX} ${departureY} C ${busX} ${secondControlY}, ${x2} ${targetLaneY - 14}, ${x2} ${y2}`;
   }
 
   private _detailItem(label: string, entity?: string, fallbackUnit = "") {
@@ -2775,7 +2814,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     return html`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} ${this._groupedPvLayout() ? "pv-grouped" : (this._compactPvLayout() ? "pv-compact" : "pv-expanded")} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} ${this._groupedPvLayout() ? "pv-grouped" : (this._compactPvLayout() ? "pv-compact" : "pv-expanded")} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -2787,7 +2826,7 @@ export class AdvancedPowerFlowCard extends LitElement {
               ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
             </div>
           </div>
-          <div class="version">v${CARD_VERSION}</div>
+          ${this._config.show_version === false ? nothing : html`<div class="version">v${CARD_VERSION}</div>`}
         </div>
 
         ${dailyItems.length
@@ -3013,23 +3052,31 @@ export class AdvancedPowerFlowCard extends LitElement {
           </svg>
         </div>
 
-        <div class="legend">
-          <span><i class="dot active"></i> aktiver Energiefluss</span>
-          <span><i class="dot idle"></i> kein relevanter Fluss</span>
-          ${diagnostics.length
-            ? html`<button class="diagnostic-summary-button" @click=${() => {
-                const next = !this._diagnosticsExpanded;
-                this._diagnosticsExpanded = next;
-                if (next) {
-                  this._heatExpanded = false;
-                  this._expandedBattery = undefined;
-                  this._pvDailyExpanded = false;
-                  this._expandedPvSystem = undefined;
-                  this._dailyBalanceExpanded = false;
-                }
-              }}>⚠ ${diagnostics.length} Hinweis${diagnostics.length === 1 ? "" : "e"}</button>`
-            : nothing}
-        </div>
+        ${(this._config.show_legend !== false || diagnostics.length)
+          ? html`
+            <div class=${`legend ${this._config.show_legend === false ? "diagnostics-only" : ""}`}>
+              ${this._config.show_legend === false
+                ? nothing
+                : html`
+                  <span><i class="dot active"></i> aktiver Energiefluss</span>
+                  <span><i class="dot idle"></i> kein relevanter Fluss</span>
+                `}
+              ${diagnostics.length
+                ? html`<button class="diagnostic-summary-button" @click=${() => {
+                    const next = !this._diagnosticsExpanded;
+                    this._diagnosticsExpanded = next;
+                    if (next) {
+                      this._heatExpanded = false;
+                      this._expandedBattery = undefined;
+                      this._pvDailyExpanded = false;
+                      this._expandedPvSystem = undefined;
+                      this._dailyBalanceExpanded = false;
+                    }
+                  }}>⚠ ${diagnostics.length} Hinweis${diagnostics.length === 1 ? "" : "e"}</button>`
+                : nothing}
+            </div>
+          `
+          : nothing}
 
         ${this._heatExpanded && this._config.heat_pump
           ? this._heatDetails(this._config.heat_pump)
@@ -3315,13 +3362,12 @@ export class AdvancedPowerFlowCard extends LitElement {
       stroke-linecap: round;
       stroke-linejoin: round;
       stroke-dasharray: 8 14;
+      stroke-dashoffset: 0;
       opacity: .98;
       filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--apfc-flow) 42%, transparent));
-      animation: dash var(--flow-duration, 1.35s) linear infinite;
     }
 
-    .flow.reverse { animation-direction: reverse; }
-    .flow.off { opacity: 0; animation: none; }
+    .flow.off { opacity: 0; }
 
     .flow-base,
     .flow {
@@ -3335,10 +3381,6 @@ export class AdvancedPowerFlowCard extends LitElement {
       opacity: 1;
       stroke-width: 4.8;
       filter: drop-shadow(0 0 3px color-mix(in srgb, var(--apfc-flow) 58%, transparent));
-    }
-
-    @keyframes dash {
-      to { stroke-dashoffset: -50; }
     }
 
     .node-bg {
@@ -3549,6 +3591,46 @@ export class AdvancedPowerFlowCard extends LitElement {
       padding-top: 8px;
       color: var(--secondary-text-color);
       font-size: 12px;
+    }
+
+    .legend.diagnostics-only {
+      justify-content: flex-end;
+      padding-top: 3px;
+    }
+
+    /* Ruhigerer Stil: weniger Rahmen, Schatten und visuelles Gewicht. */
+    ha-card.visual-clean .node-bg {
+      filter: none;
+      stroke-width: 1.1;
+    }
+
+    ha-card.visual-clean .node.active .node-bg {
+      stroke-width: 1.35;
+      filter: none;
+    }
+
+    ha-card.visual-clean .flow-base {
+      stroke-width: 5.2;
+      opacity: .72;
+    }
+
+    ha-card.visual-clean .flow {
+      stroke-width: 3.1;
+      filter: none;
+    }
+
+    ha-card.visual-clean .cluster-bg,
+    ha-card.visual-clean .pv-group-bg,
+    ha-card.visual-clean .diagram-group-bg {
+      stroke-width: .9;
+    }
+
+    ha-card.visual-clean .node.idle:not(.warning) {
+      opacity: .72;
+    }
+
+    ha-card.visual-clean .node.unavailable:not(.warning) {
+      opacity: .48;
     }
 
     .legend span {
@@ -3997,9 +4079,6 @@ export class AdvancedPowerFlowCard extends LitElement {
       .battery-fleet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .flow { animation: none; }
-    }
   `;
 }
 
