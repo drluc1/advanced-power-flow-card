@@ -13,11 +13,18 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.2";
+const CARD_VERSION = "0.3.3";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
 type NodeKind = "pv" | "pv-parent" | "center" | "grid" | "house" | "battery" | "heat" | "consumer";
+
+interface CompactMpptItem {
+  label: string;
+  value: string;
+  share?: number;
+  warning?: boolean;
+}
 
 interface DiagramNode {
   id: string;
@@ -39,6 +46,7 @@ interface DiagramNode {
   warning?: boolean;
   pvSystemIndex?: number;
   pvShare?: number;
+  compactMppts?: CompactMpptItem[];
 }
 
 interface PvClusterLayout {
@@ -102,6 +110,15 @@ interface PvGroupLayout {
   height: number;
 }
 
+interface DiagramGroupLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  kind: "battery" | "consumer";
+}
+
 interface LayoutResult {
   width: number;
   height: number;
@@ -110,7 +127,10 @@ interface LayoutResult {
   house: DiagramNode;
   pvClusters: PvClusterLayout[];
   pvGroup?: PvGroupLayout;
+  pvSummary?: DiagramNode;
   bottom: BottomNode[];
+  batteryGroup?: DiagramGroupLayout;
+  consumerGroup?: DiagramGroupLayout;
 }
 
 export class AdvancedPowerFlowCard extends LitElement {
@@ -1210,7 +1230,13 @@ export class AdvancedPowerFlowCard extends LitElement {
       if (estimated !== undefined) items.push({ key: "export-revenue", label: "PV-Erlös heute", value: this._formatMoney(estimated, true) });
     }
 
-    return items;
+    const selected = this._config.daily_items;
+    if (!selected?.length) return items;
+
+    const byKey = new Map(items.map((item) => [item.key, item]));
+    return selected
+      .map((key) => byKey.get(key))
+      .filter((item): item is (typeof items)[number] => Boolean(item));
   }
 
   private _flowFocusClass(relatedNodes: string[]): string {
@@ -1267,6 +1293,55 @@ export class AdvancedPowerFlowCard extends LitElement {
     return [first, second];
   }
 
+  private _pvStatusText(system: PvSystemConfig): string | undefined {
+    if (this._config.pv_show_status === false || !system.status) return undefined;
+    const state = this._state(system.status)?.state;
+    if (!state || state === "unknown" || state === "unavailable") return undefined;
+
+    const normalized = state.trim().toLowerCase();
+    const labels: Record<string, string> = {
+      on: "Aktiv",
+      off: "Aus",
+      running: "Aktiv",
+      producing: "Produktion",
+      production: "Produktion",
+      generating: "Produktion",
+      standby: "Standby",
+      idle: "Bereit",
+      sleeping: "Schlaf",
+      sleep: "Schlaf",
+      fault: "Fehler",
+      error: "Fehler"
+    };
+    return labels[normalized] ?? this._short(state, 14);
+  }
+
+  private _pvRelativePowerText(system: PvSystemConfig, powerW?: number): string | undefined {
+    if (this._config.pv_show_relative_power === false) return undefined;
+    if (powerW === undefined || !system.installed_kwp || system.installed_kwp <= 0) return undefined;
+    const value = Math.max(0, powerW) / system.installed_kwp;
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} W/kWp`;
+  }
+
+  private _compactMpptItems(system: PvSystemConfig): CompactMpptItem[] {
+    const children = system.children ?? [];
+    if (!children.length) return [];
+
+    const powers = children.map((child) => Math.max(0, this._powerW(child.power) ?? 0));
+    const maxPower = Math.max(0, ...powers);
+
+    return children.slice(0, 6).map((child, index) => ({
+      label: this._short(child.name ?? `MPPT ${index + 1}`, 15),
+      value: this._formatPower(child.power, true),
+      share: maxPower > this._threshold() ? this._clampPercent(powers[index] / maxPower * 100) : 0,
+      warning: Boolean(this._mpptDiagnostic(system, child, index))
+    }));
+  }
+
+  private _supplyNodeMode(): "full" | "compact" | "hidden" {
+    return this._config.supply_node ?? "full";
+  }
+
   private _layout(): LayoutResult {
     const solar = this._config.solar ?? [];
     const batteries = this._config.batteries ?? [];
@@ -1275,6 +1350,11 @@ export class AdvancedPowerFlowCard extends LitElement {
     const pvDetail = this._resolvedPvDetailLevel();
     const showPvChildren = pvDetail === "full";
     const showCompactMppts = pvDetail === "compact";
+    const nightCollapsed = Boolean(
+      solar.length &&
+      this._config.night_pv_collapse !== false &&
+      this._isPvNight()
+    );
 
     const width = 1000;
     const density = this._config.layout_density ?? "auto";
@@ -1290,206 +1370,364 @@ export class AdvancedPowerFlowCard extends LitElement {
     const pvGapX = (groupedPv ? 14 : 20) * densityFactor;
     const pvGapY = (groupedPv ? 13 : 20) * densityFactor;
 
-    let pvColumns: number;
-    if (groupedPv) {
-      if (pvDetail === "minimal") pvColumns = Math.min(3, Math.max(1, solar.length));
-      else pvColumns = solar.length <= 1 ? 1 : 2;
-    } else {
-      const legacyCompact = (this._config.pv_layout ?? "auto") === "compact";
-      pvColumns = legacyCompact
-        ? (solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2)
-        : (solar.length <= 1 ? 1 : 2);
-    }
-
-    const availablePvWidth = groupedPv ? groupW - groupInnerPad * 2 : width - sideMargin * 2;
-    const clusterWidth = pvColumns === 1
-      ? Math.min(groupedPv ? availablePvWidth : 620, availablePvWidth)
-      : (availablePvWidth - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
-
-    const childGapX = 12 * densityFactor;
-    const childGapY = 10 * densityFactor;
-    const childH = 78 * sizeFactor;
-    const clusterPadX = (groupedPv ? 8 : 18) * densityFactor;
-    const clusterPadY = (groupedPv ? 8 : 18) * densityFactor;
-    const compactTwoLines = showCompactMppts && solar.some((system) => this._compactMpptLines(system).length > 1);
-    const parentBaseH = showCompactMppts ? (compactTwoLines ? 112 : 98) : 86;
-    const parentH = parentBaseH * sizeFactor;
-    const parentMaxW = groupedPv ? clusterWidth - clusterPadX * 2 : (this._config.text_size === "xlarge" ? 450 : 430);
-
     const pvClusters: PvClusterLayout[] = [];
-    let pvY = groupedPv ? groupY + groupHeaderH : 18;
-    let pvBottom = pvY;
+    let pvGroup: PvGroupLayout | undefined;
+    let pvSummary: DiagramNode | undefined;
+    let pvBottom = 24;
 
-    for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
-      const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
-      const rowLayouts: PvClusterLayout[] = [];
+    if (nightCollapsed) {
+      const summaryW = Math.min(720, width - sideMargin * 2);
+      const summaryH = 76 * sizeFactor;
+      pvSummary = {
+        id: "pv-summary",
+        title: `PV · ${solar.length} System${solar.length === 1 ? "" : "e"}`,
+        main: this._formatW(this._totalPvW(), true),
+        sub: "Nachtmodus · PV-Details bleiben über „PV heute“ verfügbar",
+        kind: "pv-parent",
+        x: width / 2 - summaryW / 2,
+        y: 18,
+        w: summaryW,
+        h: summaryH,
+        activity: "idle",
+        badge: "Nacht"
+      };
+      pvBottom = pvSummary.y + pvSummary.h;
+    } else {
+      let pvColumns: number;
+      if (groupedPv) {
+        if (pvDetail === "minimal") pvColumns = Math.min(3, Math.max(1, solar.length));
+        else pvColumns = solar.length <= 1 ? 1 : 2;
+      } else {
+        const legacyCompact = (this._config.pv_layout ?? "auto") === "compact";
+        pvColumns = legacyCompact
+          ? (solar.length <= 1 ? 1 : solar.length >= 5 ? 3 : 2)
+          : (solar.length <= 1 ? 1 : 2);
+      }
 
-      rowSystems.forEach((system, localIndex) => {
-        const systemIndex = rowStart + localIndex;
-        const rowCount = rowSystems.length;
-        const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
-        const rowStartX = groupedPv ? groupX + (groupW - rowWidth) / 2 : (width - rowWidth) / 2;
-        const clusterX = rowStartX + localIndex * (clusterWidth + pvGapX);
+      const availablePvWidth = groupedPv ? groupW - groupInnerPad * 2 : width - sideMargin * 2;
+      const clusterWidth = pvColumns === 1
+        ? Math.min(groupedPv ? availablePvWidth : 620, availablePvWidth)
+        : (availablePvWidth - pvGapX * Math.max(0, pvColumns - 1)) / pvColumns;
 
-        const children = showPvChildren ? (system.children ?? []) : [];
-        const childColumns = Math.min(2, Math.max(1, children.length));
-        const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
-        const childrenAreaH = childRows ? childRows * childH + Math.max(0, childRows - 1) * childGapY : 0;
-        const childParentGap = children.length ? 14 * densityFactor : 0;
-        const clusterHeight = clusterPadY + childrenAreaH + childParentGap + parentH + clusterPadY;
-        const childW = childColumns === 1
-          ? Math.min(220, clusterWidth - clusterPadX * 2)
-          : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
+      const childGapX = 12 * densityFactor;
+      const childGapY = 10 * densityFactor;
+      const childH = 78 * sizeFactor;
+      const clusterPadX = (groupedPv ? 8 : 18) * densityFactor;
+      const clusterPadY = (groupedPv ? 8 : 18) * densityFactor;
 
-        const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
-        const parentX = clusterX + clusterWidth / 2 - parentW / 2;
-        const parentY = pvY + clusterPadY + childrenAreaH + childParentGap;
-        const parentPower = this._pvSystemPowerW(system);
-        const systemWarnings = this._pvSystemWarnings(system);
-        const totalPv = this._totalPvW();
-        const pvShare = parentPower !== undefined && totalPv !== undefined && totalPv > this._threshold()
-          ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100)
-          : undefined;
-        const configuredChildren = system.children?.length ?? 0;
-        const mpptLines = showCompactMppts ? this._compactMpptLines(system) : [];
+      const maxCompactChildren = showCompactMppts
+        ? Math.min(6, Math.max(0, ...solar.map((system) => system.children?.length ?? 0)))
+        : 0;
+      const compactRows = Math.ceil(maxCompactChildren / 2);
+      const compactBarsExtra = this._config.pv_compact_mppt_bars === false ? 0 : 5;
+      const parentBaseH = showCompactMppts
+        ? 88 + compactRows * (27 + compactBarsExtra)
+        : 86;
+      const parentH = parentBaseH * sizeFactor;
+      const parentMaxW = groupedPv
+        ? clusterWidth - clusterPadX * 2
+        : (this._config.text_size === "xlarge" ? 450 : 430);
 
-        const parent: DiagramNode = {
-          id: `pv-system-${systemIndex}`,
-          title: system.name ?? `PV ${systemIndex + 1}`,
-          main: this._formatW(parentPower, true),
-          sub: showCompactMppts && mpptLines.length
-            ? mpptLines[0]
-            : configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
-          sub2: showCompactMppts ? mpptLines[1] : undefined,
-          entity: system.power,
-          kind: "pv-parent",
-          x: parentX,
-          y: parentY,
-          w: parentW,
-          h: parentH,
-          activity: this._activityFromPower(parentPower),
-          badge: systemWarnings.length ? "⚠ Prüfen" : "Gesamt",
-          warning: systemWarnings.length > 0,
-          pvSystemIndex: systemIndex,
-          pvShare
-        };
+      let pvY = groupedPv ? groupY + groupHeaderH : 18;
+      pvBottom = pvY;
 
-        const childNodes: DiagramNode[] = children.map((child, childIndex) => {
-          const row = Math.floor(childIndex / childColumns);
-          const col = childIndex % childColumns;
-          const itemsInThisRow = Math.min(childColumns, children.length - row * childColumns);
-          const usedWidth = itemsInThisRow * childW + Math.max(0, itemsInThisRow - 1) * childGapX;
-          const childRowStartX = clusterX + (clusterWidth - usedWidth) / 2;
-          return {
-            id: `pv-${systemIndex}-${childIndex}`,
-            title: child.name ?? `MPPT ${childIndex + 1}`,
-            main: this._formatPower(child.power, true),
-            sub: this._pvSub(child),
-            entity: child.power,
-            kind: "pv",
-            x: childRowStartX + col * (childW + childGapX),
-            y: pvY + clusterPadY + row * (childH + childGapY),
-            w: childW,
-            h: childH,
-            activity: this._activityFromPower(this._powerW(child.power)),
-            warning: Boolean(this._mpptDiagnostic(system, child, childIndex))
+      for (let rowStart = 0; rowStart < solar.length; rowStart += pvColumns) {
+        const rowSystems = solar.slice(rowStart, rowStart + pvColumns);
+        const rowLayouts: PvClusterLayout[] = [];
+
+        rowSystems.forEach((system, localIndex) => {
+          const systemIndex = rowStart + localIndex;
+          const rowCount = rowSystems.length;
+          const rowWidth = rowCount * clusterWidth + Math.max(0, rowCount - 1) * pvGapX;
+          const rowStartX = groupedPv ? groupX + (groupW - rowWidth) / 2 : (width - rowWidth) / 2;
+          const clusterX = rowStartX + localIndex * (clusterWidth + pvGapX);
+
+          const children = showPvChildren ? (system.children ?? []) : [];
+          const childColumns = Math.min(2, Math.max(1, children.length));
+          const childRows = children.length ? Math.ceil(children.length / childColumns) : 0;
+          const childrenAreaH = childRows
+            ? childRows * childH + Math.max(0, childRows - 1) * childGapY
+            : 0;
+          const childParentGap = children.length ? 14 * densityFactor : 0;
+          const clusterHeight = clusterPadY + childrenAreaH + childParentGap + parentH + clusterPadY;
+          const childW = childColumns === 1
+            ? Math.min(220, clusterWidth - clusterPadX * 2)
+            : (clusterWidth - clusterPadX * 2 - childGapX) / 2;
+
+          const parentW = Math.min(parentMaxW, clusterWidth - clusterPadX * 2);
+          const parentX = clusterX + clusterWidth / 2 - parentW / 2;
+          const parentY = pvY + clusterPadY + childrenAreaH + childParentGap;
+          const parentPower = this._pvSystemPowerW(system);
+          const systemWarnings = this._pvSystemWarnings(system);
+          const totalPv = this._totalPvW();
+          const pvShare = parentPower !== undefined && totalPv !== undefined && totalPv > this._threshold()
+            ? this._clampPercent(Math.max(0, parentPower) / totalPv * 100)
+            : undefined;
+          const configuredChildren = system.children?.length ?? 0;
+          const infoParts = [
+            this._pvStatusText(system),
+            this._pvRelativePowerText(system, parentPower)
+          ].filter((value): value is string => Boolean(value));
+
+          const parent: DiagramNode = {
+            id: `pv-system-${systemIndex}`,
+            title: system.name ?? `PV ${systemIndex + 1}`,
+            main: this._formatW(parentPower, true),
+            sub: showCompactMppts
+              ? (infoParts.length ? infoParts.join(" · ") : `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}`)
+              : [
+                  configuredChildren ? `${configuredChildren} MPPT${configuredChildren === 1 ? "" : "s"}` : "PV-System",
+                  ...infoParts
+                ].join(" · "),
+            entity: system.power,
+            kind: "pv-parent",
+            x: parentX,
+            y: parentY,
+            w: parentW,
+            h: parentH,
+            activity: this._activityFromPower(parentPower),
+            badge: systemWarnings.length ? "⚠ Prüfen" : "Gesamt",
+            warning: systemWarnings.length > 0,
+            pvSystemIndex: systemIndex,
+            pvShare,
+            compactMppts: showCompactMppts ? this._compactMpptItems(system) : undefined
           };
+
+          const childNodes: DiagramNode[] = children.map((child, childIndex) => {
+            const row = Math.floor(childIndex / childColumns);
+            const col = childIndex % childColumns;
+            const itemsInThisRow = Math.min(childColumns, children.length - row * childColumns);
+            const usedWidth = itemsInThisRow * childW + Math.max(0, itemsInThisRow - 1) * childGapX;
+            const childRowStartX = clusterX + (clusterWidth - usedWidth) / 2;
+            return {
+              id: `pv-${systemIndex}-${childIndex}`,
+              title: child.name ?? `MPPT ${childIndex + 1}`,
+              main: this._formatPower(child.power, true),
+              sub: this._pvSub(child),
+              entity: child.power,
+              kind: "pv",
+              x: childRowStartX + col * (childW + childGapX),
+              y: pvY + clusterPadY + row * (childH + childGapY),
+              w: childW,
+              h: childH,
+              activity: this._activityFromPower(this._powerW(child.power)),
+              warning: Boolean(this._mpptDiagnostic(system, child, childIndex))
+            };
+          });
+
+          rowLayouts.push({
+            system,
+            systemIndex,
+            x: clusterX,
+            y: pvY,
+            width: clusterWidth,
+            height: clusterHeight,
+            parent,
+            children: childNodes
+          });
         });
 
-        rowLayouts.push({ system, systemIndex, x: clusterX, y: pvY, width: clusterWidth, height: clusterHeight, parent, children: childNodes });
-      });
+        pvClusters.push(...rowLayouts);
+        const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
+        pvBottom = pvY + rowHeight;
+        pvY += rowHeight + pvGapY;
+      }
 
-      pvClusters.push(...rowLayouts);
-      const rowHeight = Math.max(0, ...rowLayouts.map((cluster) => cluster.height));
-      pvBottom = pvY + rowHeight;
-      pvY += rowHeight + pvGapY;
-    }
-
-    let pvGroup: PvGroupLayout | undefined;
-    if (groupedPv && solar.length) {
-      pvGroup = { x: groupX, y: groupY, width: groupW, height: Math.max(92, pvBottom - groupY + 12) };
-      pvBottom = pvGroup.y + pvGroup.height;
-    } else if (!solar.length) {
-      pvBottom = 24;
+      if (groupedPv && solar.length) {
+        pvGroup = {
+          x: groupX,
+          y: groupY,
+          width: groupW,
+          height: Math.max(92, pvBottom - groupY + 12)
+        };
+        pvBottom = pvGroup.y + pvGroup.height;
+      } else if (!solar.length) {
+        pvBottom = 24;
+      }
     }
 
     const centerY = pvBottom + 34;
     const balance = this._systemBalanceInfo();
+    const supplyMode = this._supplyNodeMode();
+    const centerW = supplyMode === "full" ? 200 : supplyMode === "compact" ? 150 : 20;
+    const centerH = supplyMode === "full" ? 92 * sizeFactor : supplyMode === "compact" ? 64 * sizeFactor : 20;
     const center: DiagramNode = {
-      id: "center", title: "Versorgung",
-      main: balance.complete ? this._formatW(balance.source, true) : "—",
-      sub: balance.complete ? (balance.calculatedHouse ? "Haus aus Leistungsbilanz" : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}`) : "Bilanz unvollständig",
-      kind: "center", x: width / 2 - 100, y: centerY, w: 200, h: 92 * sizeFactor,
-      activity: balance.complete ? this._activityFromPower(balance.source) : "unknown", warning: balance.warning
+      id: "center",
+      title: supplyMode === "hidden" ? "" : "Versorgung",
+      main: supplyMode === "hidden" ? "" : (balance.complete ? this._formatW(balance.source, true) : "—"),
+      sub: supplyMode === "full"
+        ? (balance.complete
+          ? (balance.calculatedHouse
+            ? "Haus aus Leistungsbilanz"
+            : `${balance.warning ? "⚠ " : ""}Bilanz ${this._formatSignedW(balance.residual)}`)
+          : "Bilanz unvollständig")
+        : undefined,
+      kind: "center",
+      x: width / 2 - centerW / 2,
+      y: centerY,
+      w: centerW,
+      h: centerH,
+      activity: balance.complete ? this._activityFromPower(balance.source) : "unknown",
+      warning: balance.warning
     };
 
     const grid: DiagramNode = {
-      id: "grid", title: "Netz", main: this._formatPower(this._config.grid?.power, true),
-      sub: this._gridFlow() === "forward" ? "Energie aus Netz" : this._gridFlow() === "reverse" ? "Energie ins Netz" : "Kein Netzfluss",
-      entity: this._config.grid?.power, kind: "grid", x: 50, y: centerY + 2, w: 190, h: 88 * sizeFactor,
+      id: "grid",
+      title: "Netz",
+      main: this._formatPower(this._config.grid?.power, true),
+      sub: this._gridFlow() === "forward"
+        ? "Energie aus Netz"
+        : this._gridFlow() === "reverse"
+          ? "Energie ins Netz"
+          : "Kein Netzfluss",
+      entity: this._config.grid?.power,
+      kind: "grid",
+      x: 50,
+      y: centerY + (centerH - 88 * sizeFactor) / 2,
+      w: 190,
+      h: 88 * sizeFactor,
       activity: this._activityFromPower(this._powerW(this._config.grid?.power)),
-      badge: this._gridFlow() === "forward" ? "Bezug" : this._gridFlow() === "reverse" ? "Einspeisung" : "Ruhe"
+      badge: this._gridFlow() === "forward"
+        ? "Bezug"
+        : this._gridFlow() === "reverse"
+          ? "Einspeisung"
+          : "Ruhe"
     };
 
     const houseInfo = this._housePowerInfo();
     const house: DiagramNode = {
-      id: "house", title: this._config.house?.name ?? "Haus",
+      id: "house",
+      title: this._config.house?.name ?? "Haus",
       main: houseInfo.complete ? this._formatW(houseInfo.value, true) : "—",
-      sub: houseInfo.calculated ? (houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig") : (houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar"),
-      entity: this._config.house?.power, kind: "house", x: width - 240, y: centerY + 2, w: 190, h: 88 * sizeFactor,
+      sub: houseInfo.calculated
+        ? (houseInfo.complete ? "Aus PV, Netz & Akkus" : "Berechnung unvollständig")
+        : (houseInfo.complete ? "Gesamtverbrauch" : "Sensor nicht verfügbar"),
+      entity: this._config.house?.power,
+      kind: "house",
+      x: width - 240,
+      y: centerY + (centerH - 88 * sizeFactor) / 2,
+      w: 190,
+      h: 88 * sizeFactor,
       activity: houseInfo.complete ? this._activityFromPower(houseInfo.value) : "unknown",
-      badge: houseInfo.calculated ? (houseInfo.complete ? "Berechnet" : "Prüfen") : undefined
+      badge: houseInfo.calculated
+        ? (houseInfo.complete ? "Berechnet" : "Prüfen")
+        : undefined
     };
 
     const bottom: BottomNode[] = [];
-    const bottomSpecs: Array<{ source: "center" | "house"; width: number; make: (x: number, y: number, width: number) => BottomNode; }> = [];
+    const bottomSpecs: Array<{
+      source: "center" | "house";
+      width: number;
+      make: (x: number, y: number, width: number) => BottomNode;
+    }> = [];
 
     batteries.forEach((battery, index) => {
-      bottomSpecs.push({ source: "center", width: 205, make: (x, y, nodeW) => ({
-        source: "center", power: battery.power, direction: this._batteryFlow(battery),
-        node: {
-          id: `battery-${index}`, title: battery.name ?? `Batterie ${index + 1}`, main: this._formatPower(battery.power, true),
-          sub: [this._batteryStatus(battery), this._formatSoc(battery.soc), this._batteryEtaNodeText(battery)].filter(Boolean).join(" · "),
-          entity: battery.power ?? battery.soc, kind: "battery", x, y, w: nodeW, h: 90 * sizeFactor,
-          activity: this._activityFromPower(this._powerW(battery.power)), batterySoc: this._clampPercent(this._number(battery.soc)),
-          batteryIndex: index, warning: this._batteryWarnings(battery).length > 0, badge: this._batteryWarnings(battery).length ? "⚠ Prüfen" : undefined
-        }
-      })});
+      bottomSpecs.push({
+        source: "center",
+        width: 205,
+        make: (x, y, nodeW) => ({
+          source: "center",
+          power: battery.power,
+          direction: this._batteryFlow(battery),
+          node: {
+            id: `battery-${index}`,
+            title: battery.name ?? `Batterie ${index + 1}`,
+            main: this._formatPower(battery.power, true),
+            sub: [
+              this._batteryStatus(battery),
+              this._formatSoc(battery.soc),
+              this._batteryEtaNodeText(battery)
+            ].filter(Boolean).join(" · "),
+            entity: battery.power ?? battery.soc,
+            kind: "battery",
+            x,
+            y,
+            w: nodeW,
+            h: 90 * sizeFactor,
+            activity: this._activityFromPower(this._powerW(battery.power)),
+            batterySoc: this._clampPercent(this._number(battery.soc)),
+            batteryIndex: index,
+            warning: this._batteryWarnings(battery).length > 0,
+            badge: this._batteryWarnings(battery).length ? "⚠ Prüfen" : undefined
+          }
+        })
+      });
     });
 
     if (this._config.heat_pump) {
       const hp = this._config.heat_pump;
       const source: "center" | "house" = hp.part_of_house ?? true ? "house" : "center";
-      bottomSpecs.push({ source, width: 225, make: (x, y, nodeW) => ({
-        source, power: hp.power, direction: this._positiveFlow(this._powerW(hp.power)),
-        node: { id: "heat-pump", title: hp.name ?? "Wärmepumpe", main: this._formatPower(hp.power, true), sub: this._heatPumpSummary(hp), entity: hp.power,
-          kind: "heat", x, y, w: nodeW, h: 94 * sizeFactor, heatPump: true, activity: this._activityFromPower(this._powerW(hp.power)), badge: this._heatPumpBadge(hp) }
-      })});
+      bottomSpecs.push({
+        source,
+        width: 225,
+        make: (x, y, nodeW) => ({
+          source,
+          power: hp.power,
+          direction: this._positiveFlow(this._powerW(hp.power)),
+          node: {
+            id: "heat-pump",
+            title: hp.name ?? "Wärmepumpe",
+            main: this._formatPower(hp.power, true),
+            sub: this._heatPumpSummary(hp),
+            entity: hp.power,
+            kind: "heat",
+            x,
+            y,
+            w: nodeW,
+            h: 94 * sizeFactor,
+            heatPump: true,
+            activity: this._activityFromPower(this._powerW(hp.power)),
+            badge: this._heatPumpBadge(hp)
+          }
+        })
+      });
     }
 
     consumers.forEach((consumer, index) => {
       const source: "center" | "house" = consumer.part_of_house ?? true ? "house" : "center";
-      bottomSpecs.push({ source, width: 205, make: (x, y, nodeW) => ({
-        source, power: consumer.power, direction: this._positiveFlow(this._powerW(consumer.power)),
-        node: { id: `consumer-${index}`, title: consumer.name ?? `Verbraucher ${index + 1}`, main: this._formatPower(consumer.power, true),
-          sub: consumer.part_of_house ?? true ? "Teil des Hausverbrauchs" : "Direkter Verbraucher", entity: consumer.power, kind: "consumer",
-          x, y, w: nodeW, h: 90 * sizeFactor, activity: this._activityFromPower(this._powerW(consumer.power)) }
-      })});
+      bottomSpecs.push({
+        source,
+        width: 205,
+        make: (x, y, nodeW) => ({
+          source,
+          power: consumer.power,
+          direction: this._positiveFlow(this._powerW(consumer.power)),
+          node: {
+            id: `consumer-${index}`,
+            title: consumer.name ?? `Verbraucher ${index + 1}`,
+            main: this._formatPower(consumer.power, true),
+            sub: consumer.part_of_house ?? true ? "Teil des Hausverbrauchs" : "Direkter Verbraucher",
+            entity: consumer.power,
+            kind: "consumer",
+            x,
+            y,
+            w: nodeW,
+            h: 90 * sizeFactor,
+            activity: this._activityFromPower(this._powerW(consumer.power))
+          }
+        })
+      });
     });
 
-    const bottomStartY = centerY + center.h + 74;
+    const mainRowH = Math.max(center.h, grid.h, house.h);
+    const bottomStartY = centerY + mainRowH + 76;
     const bottomGapX = 16 * densityFactor;
-    const bottomGapY = 36 * densityFactor;
+    const bottomGapY = 42 * densityFactor;
     const bottomRowH = 94 * sizeFactor;
     const sourceGap = 34 * densityFactor;
     const centerSpecs = bottomSpecs.filter((spec) => spec.source === "center");
     const houseSpecs = bottomSpecs.filter((spec) => spec.source === "house");
     const bothGroups = centerSpecs.length > 0 && houseSpecs.length > 0;
 
-    const placeGroup = (specs: typeof bottomSpecs, regionX: number, regionW: number): number => {
+    const placeGroup = (
+      specs: typeof bottomSpecs,
+      regionX: number,
+      regionW: number
+    ): number => {
       if (!specs.length) return 0;
       const columns = Math.min(specs.length >= 5 ? 3 : 2, Math.max(1, specs.length));
       const cellW = (regionW - Math.max(0, columns - 1) * bottomGapX) / columns;
+
       specs.forEach((spec, index) => {
         const row = Math.floor(index / columns);
         const col = index % columns;
@@ -1502,6 +1740,7 @@ export class AdvancedPowerFlowCard extends LitElement {
         const y = bottomStartY + row * (bottomRowH + bottomGapY);
         bottom.push(spec.make(x, y, nodeW));
       });
+
       return Math.ceil(specs.length / columns);
     };
 
@@ -1517,12 +1756,56 @@ export class AdvancedPowerFlowCard extends LitElement {
       rightRows = placeGroup(houseSpecs, sideMargin, width - sideMargin * 2);
     }
 
-    const bottomRows = Math.max(leftRows, rightRows);
-    const height = bottomRows
-      ? bottomStartY + bottomRows * bottomRowH + Math.max(0, bottomRows - 1) * bottomGapY + 30
-      : centerY + center.h + 38;
+    const boundsFor = (nodes: DiagramNode[], label: string, kind: "battery" | "consumer"): DiagramGroupLayout | undefined => {
+      if (!nodes.length) return undefined;
+      const minX = Math.min(...nodes.map((node) => node.x));
+      const minY = Math.min(...nodes.map((node) => node.y));
+      const maxX = Math.max(...nodes.map((node) => node.x + node.w));
+      const maxY = Math.max(...nodes.map((node) => node.y + node.h));
+      return {
+        x: Math.max(8, minX - 16),
+        y: minY - 30,
+        width: Math.min(width - 16, maxX - minX + 32),
+        height: maxY - minY + 46,
+        label,
+        kind
+      };
+    };
 
-    return { width, height, center, grid, house, pvClusters, pvGroup, bottom };
+    const batteryNodes = bottom.filter((item) => item.node.kind === "battery").map((item) => item.node);
+    const consumerNodes = bottom.filter((item) => item.node.kind === "heat" || item.node.kind === "consumer").map((item) => item.node);
+    const batteryGroup = this._config.battery_layout === "separate"
+      ? undefined
+      : boundsFor(batteryNodes, "Batterien", "battery");
+    const consumerGroup = consumerNodes.length > 1
+      ? boundsFor(consumerNodes, "Verbraucher", "consumer")
+      : undefined;
+
+    const bottomRows = Math.max(leftRows, rightRows);
+    const groupBottom = Math.max(
+      batteryGroup ? batteryGroup.y + batteryGroup.height : 0,
+      consumerGroup ? consumerGroup.y + consumerGroup.height : 0
+    );
+    const height = bottomRows
+      ? Math.max(
+          bottomStartY + bottomRows * bottomRowH + Math.max(0, bottomRows - 1) * bottomGapY + 30,
+          groupBottom + 18
+        )
+      : centerY + mainRowH + 38;
+
+    return {
+      width,
+      height,
+      center,
+      grid,
+      house,
+      pvClusters,
+      pvGroup,
+      pvSummary,
+      bottom,
+      batteryGroup,
+      consumerGroup
+    };
   }
 
   private _heatPumpBadge(hp: HeatPumpConfig): string {
@@ -1658,6 +1941,36 @@ export class AdvancedPowerFlowCard extends LitElement {
         ${node.sub2
           ? svg`<text x=${node.x + 14} y=${subY + 17} class="node-sub node-sub-secondary">${this._short(node.sub2, 42)}</text>`
           : nothing}
+        ${node.compactMppts?.length
+          ? svg`
+            <g class="compact-mppt-list">
+              ${node.compactMppts.map((item, index) => {
+                const columns = 2;
+                const row = Math.floor(index / columns);
+                const col = index % columns;
+                const innerX = node.x + 14;
+                const innerW = node.w - 28;
+                const gap = 12;
+                const cellW = (innerW - gap) / 2;
+                const cellX = innerX + col * (cellW + gap);
+                const cellY = node.y + 88 + row * 32;
+                const barW = Math.max(20, cellW - 2);
+                return svg`
+                  <text x=${cellX} y=${cellY} class=${`compact-mppt-label ${item.warning ? "warning" : ""}`}>
+                    ${item.warning ? "⚠ " : ""}${this._short(item.label, 14)}
+                  </text>
+                  <text x=${cellX + cellW} y=${cellY} text-anchor="end" class="compact-mppt-value">${item.value}</text>
+                  ${this._config.pv_compact_mppt_bars !== false
+                    ? svg`
+                      <rect x=${cellX} y=${cellY + 7} width=${barW} height="3.5" rx="1.75" class="compact-mppt-track"></rect>
+                      <rect x=${cellX} y=${cellY + 7} width=${barW * (item.share ?? 0) / 100} height="3.5" rx="1.75" class="compact-mppt-fill"></rect>
+                    `
+                    : nothing}
+                `;
+              })}
+            </g>
+          `
+          : nothing}
         ${node.kind === "battery" && node.batterySoc !== undefined
           ? svg`
             <rect
@@ -1703,7 +2016,7 @@ export class AdvancedPowerFlowCard extends LitElement {
           : node.batteryIndex !== undefined
             ? svg`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>`
             : node.pvSystemIndex !== undefined
-              ? svg`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>`
+              ? svg`<text x=${node.x + node.w - 14} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>`
               : nothing}
       </g>
     `;
@@ -2536,8 +2849,55 @@ export class AdvancedPowerFlowCard extends LitElement {
           >
             ${layout.pvGroup
               ? svg`
-                <rect x=${layout.pvGroup.x} y=${layout.pvGroup.y} width=${layout.pvGroup.width} height=${layout.pvGroup.height} rx="26" class="pv-group-bg"></rect>
-                <text x=${layout.pvGroup.x + 18} y=${layout.pvGroup.y + 23} class="pv-group-title">☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+                <rect
+                  x=${layout.pvGroup.x}
+                  y=${layout.pvGroup.y}
+                  width=${layout.pvGroup.width}
+                  height=${layout.pvGroup.height}
+                  rx="26"
+                  class="pv-group-bg"
+                ></rect>
+                <text
+                  x=${layout.pvGroup.x + 18}
+                  y=${layout.pvGroup.y + 23}
+                  class="pv-group-title"
+                >☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+              `
+              : nothing}
+
+            ${layout.batteryGroup
+              ? svg`
+                <rect
+                  x=${layout.batteryGroup.x}
+                  y=${layout.batteryGroup.y}
+                  width=${layout.batteryGroup.width}
+                  height=${layout.batteryGroup.height}
+                  rx="22"
+                  class="diagram-group-bg battery-group-bg"
+                ></rect>
+                <text
+                  x=${layout.batteryGroup.x + 14}
+                  y=${layout.batteryGroup.y + 20}
+                  class="diagram-group-title battery-group-title"
+                >▰ ${layout.batteryGroup.label}</text>
+              `
+              : nothing}
+
+            ${layout.consumerGroup
+              ? svg`
+                <rect
+                  x=${layout.consumerGroup.x}
+                  y=${layout.consumerGroup.y}
+                  width=${layout.consumerGroup.width}
+                  height=${layout.consumerGroup.height}
+                  rx="22"
+                  class="diagram-group-bg consumer-group-bg"
+                ></rect>
+                <text
+                  x=${layout.consumerGroup.x + 14}
+                  y=${layout.consumerGroup.y + 20}
+                  class="diagram-group-title consumer-group-title"
+                >● ${layout.consumerGroup.label}</text>
               `
               : nothing}
 
@@ -2545,27 +2905,56 @@ export class AdvancedPowerFlowCard extends LitElement {
               const systemPower = this._pvSystemPowerW(cluster.system);
               return svg`
                 ${!layout.pvGroup
-                  ? svg`<rect x=${cluster.x} y=${cluster.y} width=${cluster.width} height=${cluster.height} rx="24" class="cluster-bg"></rect>`
+                  ? svg`
+                    <rect
+                      x=${cluster.x}
+                      y=${cluster.y}
+                      width=${cluster.width}
+                      height=${cluster.height}
+                      rx="24"
+                      class="cluster-bg"
+                    ></rect>
+                  `
                   : nothing}
                 ${cluster.children.map((child, childIndex) => {
                   const power = this._powerW(cluster.system.children?.[childIndex]?.power);
-                  return this._flowPath(this._connectionPath(child, cluster.parent), this._positiveFlow(power), power,
-                    `pv-child-${cluster.systemIndex}-${childIndex}`, [child.id, cluster.parent.id]);
+                  return this._flowPath(
+                    this._connectionPath(child, cluster.parent),
+                    this._positiveFlow(power),
+                    power,
+                    `pv-child-${cluster.systemIndex}-${childIndex}`,
+                    [child.id, cluster.parent.id]
+                  );
                 })}
                 ${!layout.pvGroup
-                  ? this._flowPath(this._connectionPath(cluster.parent, layout.center), this._positiveFlow(systemPower), systemPower,
-                      `pv-system-${cluster.systemIndex}`, [cluster.parent.id, layout.center.id, ...cluster.children.map((child) => child.id)])
+                  ? this._flowPath(
+                      this._connectionPath(cluster.parent, layout.center),
+                      this._positiveFlow(systemPower),
+                      systemPower,
+                      `pv-system-${cluster.systemIndex}`,
+                      [cluster.parent.id, layout.center.id, ...cluster.children.map((child) => child.id)]
+                    )
                   : nothing}
               `;
             })}
 
-            ${layout.pvGroup
+            ${layout.pvSummary
               ? this._flowPath(
-                  `M ${layout.pvGroup.x + layout.pvGroup.width / 2} ${layout.pvGroup.y + layout.pvGroup.height} L ${layout.center.x + layout.center.w / 2} ${layout.center.y}`,
-                  this._positiveFlow(this._totalPvW()), this._totalPvW(), "pv-group",
-                  ["center", ...(this._config.solar ?? []).map((_, index) => `pv-system-${index}`)]
+                  this._connectionPath(layout.pvSummary, layout.center),
+                  this._positiveFlow(this._totalPvW()),
+                  this._totalPvW(),
+                  "pv-summary",
+                  [layout.pvSummary.id, layout.center.id]
                 )
-              : nothing}
+              : layout.pvGroup
+                ? this._flowPath(
+                    `M ${layout.pvGroup.x + layout.pvGroup.width / 2} ${layout.pvGroup.y + layout.pvGroup.height} L ${layout.center.x + layout.center.w / 2} ${layout.center.y}`,
+                    this._positiveFlow(this._totalPvW()),
+                    this._totalPvW(),
+                    "pv-group",
+                    ["center", ...(this._config.solar ?? []).map((_, index) => `pv-system-${index}`)]
+                  )
+                : nothing}
 
             ${this._flowPath(
               this._horizontalPath(layout.grid, layout.center),
@@ -2595,12 +2984,30 @@ export class AdvancedPowerFlowCard extends LitElement {
               );
             })}
 
+            ${layout.pvSummary ? this._node(layout.pvSummary) : nothing}
             ${layout.pvClusters.map((cluster) => svg`
               ${cluster.children.map((child) => this._node(child))}
               ${this._node(cluster.parent)}
             `)}
             ${this._node(layout.grid)}
-            ${this._node(layout.center)}
+            ${this._supplyNodeMode() === "hidden"
+              ? svg`
+                <g class="supply-junction">
+                  <circle
+                    cx=${layout.center.x + layout.center.w / 2}
+                    cy=${layout.center.y + layout.center.h / 2}
+                    r="10"
+                    class="supply-junction-ring"
+                  ></circle>
+                  <circle
+                    cx=${layout.center.x + layout.center.w / 2}
+                    cy=${layout.center.y + layout.center.h / 2}
+                    r="4"
+                    class="supply-junction-dot"
+                  ></circle>
+                </g>
+              `
+              : this._node(layout.center)}
             ${this._node(layout.house)}
             ${layout.bottom.map((item) => this._node(item.node))}
           </svg>
@@ -2825,7 +3232,69 @@ export class AdvancedPowerFlowCard extends LitElement {
       font-weight: 650;
     }
 
+    .diagram-group-bg {
+      fill: color-mix(in srgb, var(--secondary-background-color) 76%, transparent);
+      stroke-width: 1.1;
+    }
+
+    .battery-group-bg {
+      stroke: color-mix(in srgb, var(--apfc-battery) 24%, var(--divider-color));
+      fill: color-mix(in srgb, var(--apfc-battery) 3%, var(--secondary-background-color));
+    }
+
+    .consumer-group-bg {
+      stroke: color-mix(in srgb, var(--apfc-consumer) 18%, var(--divider-color));
+      fill: color-mix(in srgb, var(--apfc-consumer) 2.5%, var(--secondary-background-color));
+    }
+
+    .diagram-group-title {
+      font-size: max(11px, calc(var(--apfc-node-sub-size) * .88));
+      font-weight: 650;
+      fill: var(--secondary-text-color);
+    }
+
+    .battery-group-title { fill: color-mix(in srgb, var(--apfc-battery) 70%, var(--primary-text-color)); }
+    .consumer-group-title { fill: color-mix(in srgb, var(--apfc-consumer) 62%, var(--primary-text-color)); }
+
     .node-sub-secondary { opacity: .9; }
+
+    .compact-mppt-label,
+    .compact-mppt-value {
+      font-size: max(9.5px, calc(var(--apfc-node-sub-size) * .78));
+      fill: var(--secondary-text-color);
+    }
+
+    .compact-mppt-label {
+      font-weight: 560;
+    }
+
+    .compact-mppt-label.warning {
+      fill: var(--error-color, #db4437);
+    }
+
+    .compact-mppt-value {
+      font-weight: 700;
+      fill: var(--primary-text-color);
+    }
+
+    .compact-mppt-track {
+      fill: color-mix(in srgb, var(--secondary-text-color) 18%, transparent);
+    }
+
+    .compact-mppt-fill {
+      fill: var(--apfc-solar);
+      opacity: .9;
+    }
+
+    .supply-junction-ring {
+      fill: color-mix(in srgb, var(--apfc-flow) 10%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-flow) 75%, var(--divider-color));
+      stroke-width: 2;
+    }
+
+    .supply-junction-dot {
+      fill: var(--apfc-flow);
+    }
 
     ha-card.pv-grouped .node.pv-parent .node-bg {
       fill: color-mix(in srgb, var(--apfc-solar) 9%, var(--card-background-color));
@@ -3270,6 +3739,10 @@ export class AdvancedPowerFlowCard extends LitElement {
     .pv-night .cluster-bg { opacity: .42; }
     .pv-night .node.pv:not(.warning) { opacity: .58; }
     .pv-night .node.pv-parent:not(.warning) { opacity: .68; }
+    .pv-night .node#pv-summary,
+    .pv-night .node.pv-parent[id="pv-summary"] {
+      opacity: .82;
+    }
 
     .daily-summary.daily-compact {
       display: flex;

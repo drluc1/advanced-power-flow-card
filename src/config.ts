@@ -134,10 +134,19 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
       raw.pv_detail_level === "minimal" || raw.pv_detail_level === "compact" || raw.pv_detail_level === "full" || raw.pv_detail_level === "auto"
         ? raw.pv_detail_level
         : "auto",
+    pv_show_status: typeof raw.pv_show_status === "boolean" ? raw.pv_show_status : true,
+    pv_show_relative_power: typeof raw.pv_show_relative_power === "boolean" ? raw.pv_show_relative_power : true,
+    pv_compact_mppt_bars: typeof raw.pv_compact_mppt_bars === "boolean" ? raw.pv_compact_mppt_bars : true,
+    night_pv_collapse: typeof raw.night_pv_collapse === "boolean" ? raw.night_pv_collapse : true,
+    battery_layout: raw.battery_layout === "separate" || raw.battery_layout === "grouped" ? raw.battery_layout : "grouped",
+    supply_node: raw.supply_node === "compact" || raw.supply_node === "hidden" || raw.supply_node === "full" ? raw.supply_node : "full",
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
         ? raw.daily_layout
         : "cards",
+    daily_items: Array.isArray(raw.daily_items)
+      ? raw.daily_items.filter((value): value is string => typeof value === "string") as AdvancedPowerFlowCardConfig["daily_items"]
+      : undefined,
     night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
   } as AdvancedPowerFlowCardConfig;
 }
@@ -208,6 +217,12 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     layout_density: "auto",
     pv_layout: "auto",
     pv_detail_level: "auto",
+    pv_show_status: true,
+    pv_show_relative_power: true,
+    pv_compact_mppt_bars: true,
+    night_pv_collapse: true,
+    battery_layout: "grouped",
+    supply_node: "full",
     daily_layout: "cards",
     night_mode: true
   };

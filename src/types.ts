@@ -118,6 +118,19 @@ export type DailyLayout = "auto" | "cards" | "compact";
 export type LayoutDensity = "auto" | "compact" | "comfortable";
 export type PvLayoutMode = "auto" | "expanded" | "compact" | "grouped";
 export type PvDetailLevel = "auto" | "minimal" | "compact" | "full";
+export type SupplyNodeMode = "full" | "compact" | "hidden";
+export type BatteryLayoutMode = "grouped" | "separate";
+export type DailyItemKey =
+  | "pv"
+  | "grid-import"
+  | "grid-export"
+  | "house"
+  | "autarky"
+  | "self-consumption"
+  | "import-price"
+  | "export-price"
+  | "import-cost"
+  | "export-revenue";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -159,7 +172,14 @@ export interface AdvancedPowerFlowCardConfig {
   layout_density?: LayoutDensity;
   pv_layout?: PvLayoutMode;
   pv_detail_level?: PvDetailLevel;
+  pv_show_status?: boolean;
+  pv_show_relative_power?: boolean;
+  pv_compact_mppt_bars?: boolean;
+  night_pv_collapse?: boolean;
+  battery_layout?: BatteryLayoutMode;
+  supply_node?: SupplyNodeMode;
   daily_layout?: DailyLayout;
+  daily_items?: DailyItemKey[];
   night_mode?: boolean;
 }
 

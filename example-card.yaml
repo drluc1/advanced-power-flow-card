@@ -7,6 +7,19 @@ mobile_scale: 1.08
 layout_density: auto
 pv_layout: grouped
 pv_detail_level: compact
+pv_show_status: true
+pv_show_relative_power: true
+pv_compact_mppt_bars: true
+night_pv_collapse: true
+battery_layout: grouped
+supply_node: full
+daily_items:
+  - pv
+  - house
+  - grid-import
+  - grid-export
+  - autarky
+  - self-consumption
 daily_layout: cards
 night_mode: true
 

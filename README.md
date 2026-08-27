@@ -300,13 +300,43 @@ colors:
   flow: "#03a9f4"
 ```
 
-### Gruppierte PV-Darstellung
 
-Ab v0.3.2 können mehrere PV-Systeme in einer gemeinsamen Kachel dargestellt werden:
+## v0.3.3 – kompaktere Live-Ansicht
+
+Zusätzliche Optionen für die Live-Power-Flow-Card:
 
 ```yaml
 pv_layout: grouped
 pv_detail_level: compact
+
+# Zusätzliche Informationen in der gruppierten PV-Kachel
+pv_show_status: true
+pv_show_relative_power: true
+pv_compact_mppt_bars: true
+
+# Bei PV = 0 W die komplette PV-Sektion auf eine einzelne Zeile reduzieren
+night_pv_collapse: true
+
+# Batterien optisch in einer gemeinsamen Zone gruppieren
+battery_layout: grouped
+
+# full | compact | hidden
+supply_node: full
+
+# Optional: nur diese Tageskarten anzeigen und in genau dieser Reihenfolge
+daily_items:
+  - pv
+  - house
+  - grid-import
+  - grid-export
+  - autarky
+  - self-consumption
+  - import-cost
+  - export-revenue
 ```
 
-`pv_detail_level` unterstützt `minimal`, `compact`, `full` und `auto`. In `compact` werden die MPPT-Leistungen platzsparend direkt im jeweiligen PV-Gesamtknoten angezeigt; ein Klick öffnet weiterhin die vollständige Detailansicht.
+Bei `pv_detail_level: compact` bleiben die MPPT-Leistungen im Hauptdiagramm sichtbar, ohne dass für jeden MPPT eine große eigene Kachel benötigt wird. Kleine Balken visualisieren die relative Momentanleistung der MPPTs eines PV-Systems.
+
+Wenn `status:` und `installed_kwp:` für ein PV-System konfiguriert sind, kann die Hauptansicht zusätzlich Betriebsstatus und momentane spezifische Leistung in `W/kWp` anzeigen.
+
+Mit `supply_node: hidden` bleibt nur ein kleiner zentraler Verteilerpunkt. `compact` zeigt einen kleineren Versorgungsknoten; `full` entspricht der bisherigen Darstellung.

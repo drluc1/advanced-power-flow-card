@@ -217,12 +217,35 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             { value: "full", label: "Vollständig – einzelne MPPT-Kacheln" }
           ], (value) => this._with((config) => { config.pv_detail_level = value as "auto" | "minimal" | "compact" | "full"; }))}
           <div class="help">„Gruppiert + Kompakt“ fasst alle PV-Anlagen in einer gemeinsamen Kachel zusammen und zeigt die MPPT-Leistungen platzsparend direkt unter der jeweiligen Anlagenleistung. Ein Klick auf ein PV-System öffnet weiterhin die vollständige Detailansicht.</div>
+          ${this._checkbox("PV-Systemstatus im Hauptdiagramm anzeigen", this._config.pv_show_status, true, (value) => this._with((config) => { config.pv_show_status = value; }))}
+          ${this._checkbox("Relative PV-Leistung (W/kWp) anzeigen", this._config.pv_show_relative_power, true, (value) => this._with((config) => { config.pv_show_relative_power = value; }))}
+          ${this._checkbox("Leistungsbalken bei kompakten MPPTs anzeigen", this._config.pv_compact_mppt_bars, true, (value) => this._with((config) => { config.pv_compact_mppt_bars = value; }))}
+          ${this._checkbox("PV-Sektion nachts auf eine Zeile reduzieren", this._config.night_pv_collapse, true, (value) => this._with((config) => { config.night_pv_collapse = value; }))}
+          ${this._selectInput("Batterie-Darstellung", this._config.battery_layout, [
+            { value: "grouped", label: "Gruppiert – gemeinsame Batteriezone" },
+            { value: "separate", label: "Getrennt" }
+          ], (value) => this._with((config) => { config.battery_layout = value as "grouped" | "separate"; }))}
+          ${this._selectInput("Versorgungsknoten", this._config.supply_node, [
+            { value: "full", label: "Vollständig" },
+            { value: "compact", label: "Kompakt" },
+            { value: "hidden", label: "Nur Verteilerpunkt" }
+          ], (value) => this._with((config) => { config.supply_node = value as "full" | "compact" | "hidden"; }))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },
             { value: "cards", label: "Karten" },
             { value: "compact", label: "Kompakt" }
           ], (value) => this._with((config) => { config.daily_layout = value as "auto" | "cards" | "compact"; }))}
+          ${this._textInput(
+            "Tageskarten – Auswahl/Reihenfolge",
+            (this._config.daily_items ?? []).join(", "),
+            "pv, grid-import, grid-export, house, autarky, self-consumption, import-cost, export-revenue",
+            (value) => this._with((config) => {
+              const items = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+              config.daily_items = items.length ? items as typeof config.daily_items : undefined;
+            })
+          )}
+          <div class="help">Leer = alle verfügbaren Tageswerte. Gültige Schlüssel: pv, grid-import, grid-export, house, autarky, self-consumption, import-price, export-price, import-cost, export-revenue.</div>
           ${this._checkbox("PV bei Nacht stärker ausblenden", this._config.night_mode, true, (value) => this._with((config) => { config.night_mode = value; }))}
         </section>
 

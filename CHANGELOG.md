@@ -1,12 +1,14 @@
-## 0.3.2
+## 0.3.3
 
-- Neue gruppierte PV-Darstellung: alle PV-Systeme können in einer gemeinsamen Kachel erscheinen.
-- Neue `pv_detail_level`-Option mit `minimal`, `compact`, `full` und `auto`.
-- Kompakte PV-Ansicht kann MPPT-Leistungen direkt unter der Gesamtleistung anzeigen.
-- Im automatischen Modus werden mehrere PV-Systeme standardmäßig gruppiert.
-- Gruppierte PV-Systeme nutzen nur noch eine gemeinsame Energiefluss-Verbindung zur Versorgung.
-- Speicher und hausbezogene Verbraucher werden im unteren Diagrammbereich getrennt angeordnet.
-- Batterie- und Verbraucherleitungen nutzen getrennte seitliche Busse und kreuzen dadurch deutlich seltener andere Nodes.
+- Gruppierte Batteriezone für mehrere Speicher.
+- Gemeinsame Verbraucherzone ergänzt; bestehende seitliche Busführung bleibt erhalten und wird optisch klarer strukturiert.
+- `supply_node: full | compact | hidden`: Versorgungsknoten kann verkleinert oder auf einen Verteilerpunkt reduziert werden.
+- `daily_items`: Tageskarten lassen sich auswählen und frei anordnen.
+- PV-Systemstatus kann direkt im Hauptdiagramm angezeigt werden.
+- Optionale momentane spezifische PV-Leistung in `W/kWp`.
+- Kompakte MPPT-Darstellung mit einzelnen MPPT-Leistungen und Leistungsbalken.
+- `night_pv_collapse`: PV-Sektion kann bei Nacht auf eine einzelne kompakte PV-Zeile reduziert werden.
+- Alle neuen Optionen sind rückwärtskompatibel und im grafischen Editor verfügbar.
 
 ## 0.3.1
 
