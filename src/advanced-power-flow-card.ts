@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.2.9";
+const CARD_VERSION = "0.3.0";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";

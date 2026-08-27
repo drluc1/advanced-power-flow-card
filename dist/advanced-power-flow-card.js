@@ -1523,8 +1523,8 @@ var AdvancedPowerFlowCardEditor = class extends i {
 if (!customElements.get("advanced-power-flow-card-editor")) customElements.define("advanced-power-flow-card-editor", AdvancedPowerFlowCardEditor);
 //#endregion
 //#region src/advanced-power-flow-card.ts
-var CARD_NAME = "Advanced Power Flow Card";
-var CARD_VERSION = "0.2.9";
+var CARD_NAME$1 = "Advanced Power Flow Card";
+var CARD_VERSION$1 = "0.3.0";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -3392,7 +3392,7 @@ var AdvancedPowerFlowCard = class extends i {
               ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
             </div>
           </div>
-          <div class="version">v${CARD_VERSION}</div>
+          <div class="version">v${CARD_VERSION$1}</div>
         </div>
 
         ${dailyItems.length ? b`
@@ -4389,13 +4389,839 @@ if (!customElements.get("advanced-power-flow-card")) customElements.define("adva
 window.customCards = window.customCards || [];
 if (!window.customCards.some((card) => card.type === "advanced-power-flow-card")) window.customCards.push({
 	type: "advanced-power-flow-card",
-	name: CARD_NAME,
+	name: CARD_NAME$1,
 	description: "Flexible power-flow visualization with dynamic PV systems, MPPTs, batteries and consumers.",
 	preview: true,
 	configurable: true
 });
-console.info(`%c ${CARD_NAME} %c v${CARD_VERSION} `, "background:#03a9f4;color:white;font-weight:700;", "background:#222;color:white;");
+console.info(`%c ${CARD_NAME$1} %c v${CARD_VERSION$1} `, "background:#03a9f4;color:white;font-weight:700;", "background:#222;color:white;");
 //#endregion
-export { AdvancedPowerFlowCard };
+//#region src/energy-analytics-editor.ts
+var EnergyAnalyticsCardEditor = class extends i {
+	constructor(..._args) {
+		super(..._args);
+		this._config = {
+			type: "custom:energy-analytics-card",
+			title: "Energy Analytics",
+			default_range: "days",
+			day_count: 30,
+			month_count: 12,
+			year_count: 5,
+			text_size: "large",
+			energy: {},
+			solar: [],
+			batteries: []
+		};
+	}
+	static {
+		this.properties = {
+			hass: { attribute: false },
+			_config: { state: true }
+		};
+	}
+	setConfig(config) {
+		this._config = structuredClone(config);
+	}
+	_get(path) {
+		let value = this._config;
+		for (const part of path) if (typeof part === "number") {
+			if (!Array.isArray(value)) return void 0;
+			value = value[part];
+		} else {
+			if (!value || typeof value !== "object") return void 0;
+			value = value[part];
+		}
+		return value;
+	}
+	_set(path, value) {
+		const next = structuredClone(this._config);
+		let cursor = next;
+		path.forEach((part, index) => {
+			const last = index === path.length - 1;
+			if (typeof part === "number") {
+				if (!Array.isArray(cursor)) return;
+				if (last) cursor[part] = value;
+				else cursor = cursor[part];
+			} else {
+				if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) return;
+				const obj = cursor;
+				if (last) {
+					if (value === "" || value === void 0 || value === null) delete obj[part];
+					else obj[part] = value;
+				} else {
+					const nextPart = path[index + 1];
+					if (!(part in obj) || obj[part] == null) obj[part] = typeof nextPart === "number" ? [] : {};
+					cursor = obj[part];
+				}
+			}
+		});
+		this._config = next;
+		this._emit();
+	}
+	_emit() {
+		this.dispatchEvent(new CustomEvent("config-changed", {
+			detail: { config: this._config },
+			bubbles: true,
+			composed: true
+		}));
+	}
+	_entity(label, path) {
+		return b`
+      <label>${label}</label>
+      <ha-entity-picker
+        .hass=${this.hass}
+        .value=${this._get(path) ?? ""}
+        .allowCustomEntity=${true}
+        @value-changed=${(e) => this._set(path, e.detail?.value ?? "")}
+      ></ha-entity-picker>
+    `;
+	}
+	_text(label, path, placeholder = "") {
+		return b`
+      <label>${label}</label>
+      <input type="text" .value=${this._get(path) ?? ""}
+        placeholder=${placeholder}
+        @input=${(e) => this._set(path, e.target.value)} />
+    `;
+	}
+	_number(label, path, fallback, step = "1") {
+		const value = this._get(path);
+		return b`
+      <label>${label}</label>
+      <input type="number" step=${step} .value=${String(typeof value === "number" ? value : fallback)}
+        @input=${(e) => this._set(path, Number(e.target.value))} />
+    `;
+	}
+	_select(label, path, options, fallback) {
+		return b`
+      <label>${label}</label>
+      <select .value=${this._get(path) ?? fallback} @change=${(e) => this._set(path, e.target.value)}>
+        ${options.map(([v, text]) => b`<option value=${v}>${text}</option>`)}
+      </select>
+    `;
+	}
+	_addSolar() {
+		const solar = [...this._config.solar ?? []];
+		solar.push({
+			name: `PV-System ${solar.length + 1}`,
+			children: []
+		});
+		this._config = {
+			...this._config,
+			solar
+		};
+		this._emit();
+	}
+	_removeSolar(index) {
+		const solar = [...this._config.solar ?? []];
+		solar.splice(index, 1);
+		this._config = {
+			...this._config,
+			solar
+		};
+		this._emit();
+	}
+	_addMppt(systemIndex) {
+		const solar = structuredClone(this._config.solar ?? []);
+		const system = solar[systemIndex] ?? { children: [] };
+		const children = [...system.children ?? []];
+		children.push({ name: `MPPT ${children.length + 1}` });
+		system.children = children;
+		solar[systemIndex] = system;
+		this._config = {
+			...this._config,
+			solar
+		};
+		this._emit();
+	}
+	_removeMppt(systemIndex, childIndex) {
+		const solar = structuredClone(this._config.solar ?? []);
+		const system = solar[systemIndex];
+		if (!system) return;
+		const children = [...system.children ?? []];
+		children.splice(childIndex, 1);
+		system.children = children;
+		this._config = {
+			...this._config,
+			solar
+		};
+		this._emit();
+	}
+	render() {
+		if (!this.hass) return A;
+		return b`
+      <div class="editor">
+        <section>
+          <h3>Allgemein</h3>
+          ${this._text("Titel", ["title"], "Energy Analytics")}
+          ${this._select("Standardansicht", ["default_range"], [
+			["days", "30 Tage"],
+			["months", "12 Monate"],
+			["years", "5 Jahre"]
+		], "days")}
+          ${this._number("Anzahl Tage", ["day_count"], 30)}
+          ${this._number("Anzahl Monate", ["month_count"], 12)}
+          ${this._number("Anzahl Jahre", ["year_count"], 5)}
+          ${this._select("Schriftgröße", ["text_size"], [
+			["normal", "Normal"],
+			["large", "Groß"],
+			["xlarge", "Sehr groß"]
+		], "large")}
+        </section>
+
+        <section>
+          <h3>Langzeit-Energiesensoren</h3>
+          ${this._entity("PV gesamt", ["energy", "pv_total"])}
+          ${this._entity("Hausverbrauch", ["energy", "house"])}
+          ${this._entity("Netzbezug", ["energy", "grid_import"])}
+          ${this._entity("Einspeisung", ["energy", "grid_export"])}
+          ${this._entity("Batterie geladen", ["energy", "battery_charge"])}
+          ${this._entity("Batterie entladen", ["energy", "battery_discharge"])}
+          ${this._entity("Wärmepumpe elektrisch", ["energy", "heat_pump"])}
+          ${this._entity("Wärmepumpe thermisch", ["energy", "heat_pump_thermal"])}
+          ${this._entity("Wallbox", ["energy", "wallbox"])}
+          ${this._entity("Netzkosten kumuliert", ["energy", "cost_import"])}
+          ${this._entity("Einspeiseerlös kumuliert", ["energy", "revenue_export"])}
+        </section>
+
+        <div class="section-head">
+          <h3>PV-Systeme / MPPTs</h3>
+          <button @click=${this._addSolar}>+ PV-System</button>
+        </div>
+        ${(this._config.solar ?? []).map((system, i) => b`
+          <section class="solar">
+            <div class="section-head full">
+              <h3>${system.name ?? `PV-System ${i + 1}`}</h3>
+              <button class="danger" @click=${() => this._removeSolar(i)}>Entfernen</button>
+            </div>
+            ${this._text("Name", [
+			"solar",
+			i,
+			"name"
+		], `PV-System ${i + 1}`)}
+            ${this._entity("Gesamtenergie total", [
+			"solar",
+			i,
+			"energy"
+		])}
+            ${this._number("Installiert kWp", [
+			"solar",
+			i,
+			"installed_kwp"
+		], system.installed_kwp ?? 0, "0.01")}
+            <div class="subhead full"><strong>MPPTs / Sub-PV</strong><button @click=${() => this._addMppt(i)}>+ MPPT</button></div>
+            ${(system.children ?? []).map((child, j) => b`
+              <div class="mppt full">
+                <div class="mppt-title"><strong>${child.name ?? `MPPT ${j + 1}`}</strong><button class="danger" @click=${() => this._removeMppt(i, j)}>×</button></div>
+                <div class="grid">
+                  ${this._text("Name", [
+			"solar",
+			i,
+			"children",
+			j,
+			"name"
+		], `MPPT ${j + 1}`)}
+                  ${this._entity("Energie total", [
+			"solar",
+			i,
+			"children",
+			j,
+			"energy"
+		])}
+                  ${this._number("Installiert kWp", [
+			"solar",
+			i,
+			"children",
+			j,
+			"installed_kwp"
+		], child.installed_kwp ?? 0, "0.01")}
+                </div>
+              </div>
+            `)}
+          </section>
+        `)}
+      </div>
+    `;
+	}
+	static {
+		this.styles = i$3`
+    :host { display:block; }
+    .editor { display:grid; gap:12px; }
+    section { display:grid; grid-template-columns:minmax(150px,.8fr) minmax(190px,1.4fr); gap:9px 12px; padding:12px; border:1px solid var(--divider-color); border-radius:12px; }
+    h3 { margin:0; font-size:15px; }
+    section > h3 { grid-column:1/-1; margin-bottom:4px; }
+    label { align-self:center; font-size:13px; }
+    input, select { width:100%; box-sizing:border-box; min-height:40px; padding:8px 10px; border:1px solid var(--divider-color); border-radius:8px; background:var(--card-background-color); color:var(--primary-text-color); }
+    button { border:1px solid var(--divider-color); border-radius:9px; background:var(--card-background-color); color:var(--primary-text-color); padding:7px 10px; cursor:pointer; }
+    button.danger { color:var(--error-color); }
+    .section-head, .subhead, .mppt-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .section-head.full, .subhead.full, .mppt.full { grid-column:1/-1; }
+    .solar { background:color-mix(in srgb, var(--card-background-color) 94%, var(--warning-color,#f5a623) 6%); }
+    .mppt { padding:10px; border:1px dashed var(--divider-color); border-radius:10px; }
+    .mppt-title { margin-bottom:8px; }
+    .grid { display:grid; grid-template-columns:minmax(150px,.8fr) minmax(190px,1.4fr); gap:8px 12px; }
+    @media(max-width:600px){ section,.grid{grid-template-columns:1fr;} section>h3,.section-head.full,.subhead.full,.mppt.full{grid-column:1;} }
+  `;
+	}
+};
+if (!customElements.get("energy-analytics-card-editor")) customElements.define("energy-analytics-card-editor", EnergyAnalyticsCardEditor);
+//#endregion
+//#region src/energy-analytics-card.ts
+var CARD_NAME = "Energy Analytics Card";
+var CARD_VERSION = "0.3.0";
+function clamp(value, min, max) {
+	return Math.min(max, Math.max(min, value));
+}
+function finite(value) {
+	const number = typeof value === "number" ? value : Number(value);
+	return Number.isFinite(number) ? number : void 0;
+}
+var EnergyAnalyticsCard = class extends i {
+	constructor(..._args) {
+		super(..._args);
+		this._range = "days";
+		this._stats = {};
+		this._loading = false;
+		this._error = "";
+		this._enabledSeries = ["pv_total", "house"];
+		this._missingStatistics = [];
+		this._lastLoadKey = "";
+	}
+	static {
+		this.properties = {
+			hass: { attribute: false },
+			_config: { state: true },
+			_range: { state: true },
+			_stats: { state: true },
+			_loading: { state: true },
+			_error: { state: true },
+			_enabledSeries: { state: true },
+			_selectedBucketStart: { state: true },
+			_missingStatistics: { state: true }
+		};
+	}
+	static getConfigElement() {
+		return document.createElement("energy-analytics-card-editor");
+	}
+	static getStubConfig() {
+		return {
+			type: "custom:energy-analytics-card",
+			title: "Energy Analytics",
+			default_range: "days",
+			day_count: 30,
+			month_count: 12,
+			year_count: 5,
+			text_size: "large",
+			energy: {
+				pv_total: "sensor.pv_energy_total",
+				house: "sensor.house_energy_total",
+				grid_import: "sensor.grid_import_total",
+				grid_export: "sensor.grid_export_total",
+				battery_charge: "sensor.battery_charge_energy_total",
+				battery_discharge: "sensor.battery_discharge_energy_total",
+				heat_pump: "sensor.heatpump_energy_total"
+			},
+			solar: [{
+				name: "Hausdach",
+				energy: "sensor.pv_roof_energy_total",
+				installed_kwp: 7.92,
+				children: [{
+					name: "MPPT 1",
+					energy: "sensor.pv_roof_mppt1_energy_total",
+					installed_kwp: 4.95
+				}, {
+					name: "MPPT 2",
+					energy: "sensor.pv_roof_mppt2_energy_total",
+					installed_kwp: 2.97
+				}]
+			}]
+		};
+	}
+	setConfig(config) {
+		if (!config) throw new Error("Konfiguration fehlt.");
+		this._config = structuredClone(config);
+		this._range = config.default_range ?? "days";
+		this._lastLoadKey = "";
+	}
+	getCardSize() {
+		return 7;
+	}
+	getGridOptions() {
+		return {
+			rows: 7,
+			columns: 12,
+			min_rows: 5,
+			min_columns: 6
+		};
+	}
+	updated(changed) {
+		if (!this.hass?.callWS || !this._config) return;
+		if (changed.has("hass") || changed.has("_config") || changed.has("_range")) {
+			const key = this._loadKey();
+			if (key !== this._lastLoadKey) {
+				this._lastLoadKey = key;
+				this._loadStatistics();
+			}
+		}
+	}
+	_loadKey() {
+		return `${this._range}:${JSON.stringify(this._config?.energy ?? {})}:${JSON.stringify(this._config?.solar ?? [])}`;
+	}
+	_rangeInfo() {
+		const now = /* @__PURE__ */ new Date();
+		if (this._range === "months") {
+			const count = clamp(Math.round(this._config.month_count ?? 12), 1, 36);
+			return {
+				start: new Date(now.getFullYear(), now.getMonth() - count + 1, 1),
+				end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+				period: "month",
+				count
+			};
+		}
+		if (this._range === "years") {
+			const count = clamp(Math.round(this._config.year_count ?? 5), 1, 15);
+			return {
+				start: new Date(now.getFullYear() - count + 1, 0, 1),
+				end: new Date(now.getFullYear() + 1, 0, 1),
+				period: "year",
+				count
+			};
+		}
+		const count = clamp(Math.round(this._config.day_count ?? 30), 1, 92);
+		return {
+			start: new Date(now.getFullYear(), now.getMonth(), now.getDate() - count + 1),
+			end: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+			period: "day",
+			count
+		};
+	}
+	_allStatisticIds() {
+		const ids = /* @__PURE__ */ new Set();
+		Object.values(this._config.energy ?? {}).forEach((id) => {
+			if (typeof id === "string" && id) ids.add(id);
+		});
+		for (const system of this._config.solar ?? []) {
+			if (system.energy) ids.add(system.energy);
+			for (const child of system.children ?? []) if (child.energy) ids.add(child.energy);
+		}
+		for (const battery of this._config.batteries ?? []) {
+			if (battery.charge_energy) ids.add(battery.charge_energy);
+			if (battery.discharge_energy) ids.add(battery.discharge_energy);
+		}
+		return [...ids];
+	}
+	async _loadStatistics() {
+		if (!this.hass?.callWS) return;
+		const ids = this._allStatisticIds();
+		if (!ids.length) {
+			this._stats = {};
+			this._error = "Keine Langzeit-Energiesensoren konfiguriert.";
+			return;
+		}
+		this._loading = true;
+		this._error = "";
+		try {
+			const { start, end, period } = this._rangeInfo();
+			const [stats, metadata] = await Promise.all([this.hass.callWS({
+				type: "recorder/statistics_during_period",
+				start_time: start.toISOString(),
+				end_time: end.toISOString(),
+				statistic_ids: ids,
+				period,
+				units: { energy: "kWh" },
+				types: [
+					"change",
+					"sum",
+					"state"
+				]
+			}), this.hass.callWS({
+				type: "recorder/get_statistics_metadata",
+				statistic_ids: ids
+			}).catch(() => [])]);
+			this._stats = stats ?? {};
+			const available = new Set((metadata ?? []).map((m) => m.statistic_id));
+			this._missingStatistics = available.size ? ids.filter((id) => !available.has(id)) : [];
+			const buckets = this._energyBuckets();
+			if (buckets.length) this._selectedBucketStart = buckets[buckets.length - 1].start;
+		} catch (error) {
+			this._error = error instanceof Error ? error.message : String(error);
+			this._stats = {};
+		} finally {
+			this._loading = false;
+		}
+	}
+	_rowValue(row) {
+		if (!row) return void 0;
+		const change = finite(row.change);
+		if (change !== void 0) return Math.max(0, change);
+	}
+	_valueAt(entity, start) {
+		if (!entity) return void 0;
+		const row = (this._stats[entity] ?? []).find((candidate) => candidate.start === start);
+		return this._rowValue(row);
+	}
+	_seriesDefs() {
+		const energy = this._config.energy ?? {};
+		return [
+			{
+				key: "pv_total",
+				label: "PV",
+				entity: energy.pv_total
+			},
+			{
+				key: "house",
+				label: "Haus",
+				entity: energy.house
+			},
+			{
+				key: "grid_import",
+				label: "Netzbezug",
+				entity: energy.grid_import
+			},
+			{
+				key: "grid_export",
+				label: "Einspeisung",
+				entity: energy.grid_export
+			},
+			{
+				key: "battery_charge",
+				label: "Akku laden",
+				entity: energy.battery_charge
+			},
+			{
+				key: "battery_discharge",
+				label: "Akku entladen",
+				entity: energy.battery_discharge
+			},
+			{
+				key: "heat_pump",
+				label: "Wärmepumpe",
+				entity: energy.heat_pump
+			},
+			{
+				key: "wallbox",
+				label: "Wallbox",
+				entity: energy.wallbox
+			}
+		].filter((s) => !!s.entity);
+	}
+	_canonicalStarts() {
+		const ids = this._allStatisticIds();
+		const starts = /* @__PURE__ */ new Set();
+		const { start, end, count } = this._rangeInfo();
+		const min = start.getTime();
+		const max = end.getTime();
+		for (const id of ids) for (const row of this._stats[id] ?? []) if (row.start >= min && row.start < max) starts.add(row.start);
+		return [...starts].sort((a, b) => a - b).slice(-count);
+	}
+	_bucketLabel(start, short = false) {
+		const d = new Date(start);
+		if (this._range === "years") return String(d.getFullYear());
+		if (this._range === "months") return d.toLocaleDateString(void 0, short ? { month: "short" } : {
+			month: "long",
+			year: "numeric"
+		});
+		return d.toLocaleDateString(void 0, short ? {
+			day: "2-digit",
+			month: "2-digit"
+		} : {
+			day: "2-digit",
+			month: "2-digit",
+			year: "numeric"
+		});
+	}
+	_energyBuckets() {
+		const series = this._seriesDefs();
+		return this._canonicalStarts().map((start) => {
+			const values = {};
+			for (const def of series) {
+				const value = this._valueAt(def.entity, start);
+				if (value !== void 0) values[def.key] = value;
+			}
+			return {
+				start,
+				label: this._bucketLabel(start),
+				shortLabel: this._bucketLabel(start, true),
+				values
+			};
+		});
+	}
+	_systemEnergyAt(system, start) {
+		const direct = this._valueAt(system.energy, start);
+		if (direct !== void 0) return direct;
+		const childValues = (system.children ?? []).map((child) => this._valueAt(child.energy, start)).filter((v) => v !== void 0);
+		return childValues.length ? childValues.reduce((a, b) => a + b, 0) : void 0;
+	}
+	_systemEfficiencyAt(system, start) {
+		const energy = this._systemEnergyAt(system, start);
+		const kwp = finite(system.installed_kwp);
+		if (energy === void 0 || !kwp || kwp <= 0) return void 0;
+		return energy / kwp;
+	}
+	_toggleSeries(key) {
+		const current = new Set(this._enabledSeries);
+		if (current.has(key)) {
+			if (current.size > 1) current.delete(key);
+		} else current.add(key);
+		this._enabledSeries = [...current];
+	}
+	_formatEnergy(value) {
+		if (value === void 0 || !Number.isFinite(value)) return "—";
+		if (value >= 1e3) return `${(value / 1e3).toLocaleString(void 0, { maximumFractionDigits: 2 })} MWh`;
+		return `${value.toLocaleString(void 0, { maximumFractionDigits: value < 10 ? 2 : 1 })} kWh`;
+	}
+	_formatEfficiency(value) {
+		if (value === void 0 || !Number.isFinite(value)) return "—";
+		return `${value.toLocaleString(void 0, { maximumFractionDigits: 2 })} kWh/kWp`;
+	}
+	_formatPercent(value) {
+		if (value === void 0 || !Number.isFinite(value)) return "—";
+		return `${clamp(value, 0, 100).toLocaleString(void 0, { maximumFractionDigits: 1 })} %`;
+	}
+	_energyChart() {
+		const buckets = this._energyBuckets();
+		const defs = this._seriesDefs().filter((def) => this._enabledSeries.includes(def.key));
+		if (!buckets.length || !defs.length) return b`<div class="empty">Für diesen Zeitraum sind keine Statistikdaten vorhanden.</div>`;
+		const W = 1e3, H = 360, left = 58, top = 20;
+		const chartW = 924, chartH = 282;
+		const max = Math.max(1, ...buckets.flatMap((b) => defs.map((d) => b.values[d.key] ?? 0)));
+		const slot = chartW / buckets.length;
+		const groupWidth = slot * .72;
+		const barWidth = Math.max(1.5, groupWidth / defs.length);
+		const labelStep = Math.max(1, Math.ceil(buckets.length / 8));
+		return b`
+      <div class="chart-shell">
+        <svg viewBox="0 0 ${W} ${H}" class="chart" aria-label="Energieverlauf">
+          ${[
+			0,
+			.25,
+			.5,
+			.75,
+			1
+		].map((ratio) => {
+			const y = top + chartH * (1 - ratio);
+			const value = max * ratio;
+			return w`
+              <line x1=${left} x2=${982} y1=${y} y2=${y} class="gridline"></line>
+              <text x=${49} y=${y + 4} text-anchor="end" class="axis-label">${value.toLocaleString(void 0, { maximumFractionDigits: 1 })}</text>
+            `;
+		})}
+          ${buckets.map((bucket, bi) => {
+			const baseX = left + bi * slot + (slot - groupWidth) / 2;
+			return w`
+              ${bucket.start === this._selectedBucketStart ? w`<rect x=${left + bi * slot} y=${top} width=${slot} height=${chartH} class="selected-band"></rect>` : A}
+              ${defs.map((def, si) => {
+				const value = bucket.values[def.key] ?? 0;
+				const height = chartH * value / max;
+				return w`<rect x=${baseX + si * barWidth} y=${302 - height} width=${Math.max(1, barWidth - 1.5)} height=${Math.max(0, height)} rx="2" class=${`bar series-${def.key}`}>
+                  <title>${bucket.label} · ${def.label}: ${this._formatEnergy(value)}</title>
+                </rect>`;
+			})}
+              <rect x=${left + bi * slot} y=${top} width=${slot} height=${chartH} class="hit" @click=${() => this._selectedBucketStart = bucket.start}></rect>
+              ${bi % labelStep === 0 || bi === buckets.length - 1 ? w`<text x=${left + bi * slot + slot / 2} y=${332} text-anchor="middle" class="x-label">${bucket.shortLabel}</text>` : A}
+            `;
+		})}
+          <text x="14" y=${161} transform=${`rotate(-90 14 161)`} text-anchor="middle" class="axis-title">kWh</text>
+        </svg>
+      </div>
+    `;
+	}
+	_pvEfficiencyChart() {
+		const systems = (this._config.solar ?? []).filter((s) => (s.installed_kwp ?? 0) > 0 && (!!s.energy || (s.children ?? []).some((c) => !!c.energy)));
+		const starts = this._canonicalStarts();
+		if (!systems.length || !starts.length) return A;
+		const W = 1e3, H = 330, left = 58, top = 20;
+		const chartW = 924, chartH = 252;
+		const values = starts.flatMap((start) => systems.map((system) => this._systemEfficiencyAt(system, start) ?? 0));
+		const max = Math.max(.1, ...values);
+		const slot = chartW / starts.length;
+		const groupWidth = slot * .72;
+		const barWidth = Math.max(1.5, groupWidth / systems.length);
+		const labelStep = Math.max(1, Math.ceil(starts.length / 8));
+		return b`
+      <section class="panel">
+        <div class="panel-head">
+          <div><h3>PV-Effizienz</h3><p>Spezifischer Ertrag – Anlagen unterschiedlicher Größe direkt vergleichbar.</p></div>
+          <span class="unit-badge">kWh/kWp</span>
+        </div>
+        <div class="legend-row">${systems.map((s, i) => b`<span><i class=${`legend-swatch pv-${i % 5}`}></i>${s.name ?? `PV ${i + 1}`}</span>`)}</div>
+        <div class="chart-shell">
+          <svg viewBox="0 0 ${W} ${H}" class="chart" aria-label="PV Effizienz">
+            ${[
+			0,
+			.25,
+			.5,
+			.75,
+			1
+		].map((ratio) => {
+			const y = top + chartH * (1 - ratio);
+			const value = max * ratio;
+			return w`<line x1=${left} x2=${982} y1=${y} y2=${y} class="gridline"></line><text x=${49} y=${y + 4} text-anchor="end" class="axis-label">${value.toLocaleString(void 0, { maximumFractionDigits: 2 })}</text>`;
+		})}
+            ${starts.map((start, bi) => {
+			const baseX = left + bi * slot + (slot - groupWidth) / 2;
+			return w`
+                ${systems.map((system, si) => {
+				const value = this._systemEfficiencyAt(system, start) ?? 0;
+				const height = chartH * value / max;
+				return w`<rect x=${baseX + si * barWidth} y=${272 - height} width=${Math.max(1, barWidth - 1.5)} height=${height} rx="2" class=${`bar pv-${si % 5}`}><title>${this._bucketLabel(start)} · ${system.name}: ${this._formatEfficiency(value)}</title></rect>`;
+			})}
+                ${bi % labelStep === 0 || bi === starts.length - 1 ? w`<text x=${left + bi * slot + slot / 2} y=${302} text-anchor="middle" class="x-label">${this._bucketLabel(start, true)}</text>` : A}
+              `;
+		})}
+          </svg>
+        </div>
+      </section>
+    `;
+	}
+	_selectedBucket() {
+		const buckets = this._energyBuckets();
+		return buckets.find((b) => b.start === this._selectedBucketStart) ?? buckets[buckets.length - 1];
+	}
+	_selectedDetail() {
+		const bucket = this._selectedBucket();
+		if (!bucket) return A;
+		const energy = bucket.values;
+		const pv = energy.pv_total;
+		const house = energy.house;
+		const gridImport = energy.grid_import;
+		const gridExport = energy.grid_export;
+		const autarky = house && gridImport !== void 0 && house > 0 ? 100 * (1 - gridImport / house) : void 0;
+		const selfUse = pv && gridExport !== void 0 && pv > 0 ? 100 * (1 - gridExport / pv) : void 0;
+		const hpElectric = this._valueAt(this._config.energy?.heat_pump, bucket.start);
+		const hpThermal = this._valueAt(this._config.energy?.heat_pump_thermal, bucket.start);
+		const jaz = hpElectric && hpThermal !== void 0 && hpElectric > 0 ? hpThermal / hpElectric : void 0;
+		return b`
+      <section class="panel selected-detail">
+        <div class="panel-head"><div><h3>${bucket.label}</h3><p>Detailwerte des ausgewählten Balkens.</p></div></div>
+        <div class="metric-grid">
+          ${this._metric("PV", pv, "energy")}
+          ${this._metric("Haus", house, "energy")}
+          ${this._metric("Netzbezug", gridImport, "energy")}
+          ${this._metric("Einspeisung", gridExport, "energy")}
+          ${this._metric("Akku geladen", energy.battery_charge, "energy")}
+          ${this._metric("Akku entladen", energy.battery_discharge, "energy")}
+          ${this._metric("Autarkie", autarky, "percent")}
+          ${this._metric("Eigenverbrauch", selfUse, "percent")}
+          ${this._metric("Wärmepumpe", hpElectric, "energy")}
+          ${this._metric("JAZ/COP Zeitraum", jaz, "number")}
+        </div>
+        ${(this._config.solar ?? []).length ? b`
+          <h4>PV-Systeme</h4>
+          <div class="pv-table">
+            ${(this._config.solar ?? []).map((system) => {
+			const sysEnergy = this._systemEnergyAt(system, bucket.start);
+			const efficiency = this._systemEfficiencyAt(system, bucket.start);
+			return b`
+                <div class="pv-system-row">
+                  <div class="pv-system-title"><strong>${system.name ?? "PV-System"}</strong><span>${this._formatEnergy(sysEnergy)} · ${this._formatEfficiency(efficiency)}</span></div>
+                  ${(system.children ?? []).length ? b`<div class="mppt-list">
+                    ${(system.children ?? []).map((child) => this._mpptRow(child, bucket.start, sysEnergy))}
+                  </div>` : A}
+                </div>
+              `;
+		})}
+          </div>
+        ` : A}
+      </section>
+    `;
+	}
+	_mpptRow(child, start, systemEnergy) {
+		const energy = this._valueAt(child.energy, start);
+		const kwp = finite(child.installed_kwp);
+		const eff = energy !== void 0 && kwp && kwp > 0 ? energy / kwp : void 0;
+		const share = energy !== void 0 && systemEnergy && systemEnergy > 0 ? 100 * energy / systemEnergy : void 0;
+		return b`<div class="mppt-row"><span>${child.name ?? "MPPT"}</span><strong>${this._formatEnergy(energy)}</strong><span>${this._formatEfficiency(eff)}</span><span>${share === void 0 ? "—" : this._formatPercent(share)}</span></div>`;
+	}
+	_metric(label, value, type) {
+		let text = "—";
+		if (type === "energy") text = this._formatEnergy(value);
+		else if (type === "percent") text = this._formatPercent(value);
+		else if (value !== void 0) text = value.toLocaleString(void 0, { maximumFractionDigits: 2 });
+		return b`<div class="metric"><span>${label}</span><strong>${text}</strong></div>`;
+	}
+	_summary() {
+		const bucket = this._selectedBucket();
+		if (!bucket) return A;
+		const v = bucket.values;
+		const autarky = v.house && v.grid_import !== void 0 && v.house > 0 ? 100 * (1 - v.grid_import / v.house) : void 0;
+		return b`
+      <div class="summary-grid">
+        ${this._metric("PV", v.pv_total, "energy")}
+        ${this._metric("Haus", v.house, "energy")}
+        ${this._metric("Netzbezug", v.grid_import, "energy")}
+        ${this._metric("Autarkie", autarky, "percent")}
+      </div>
+    `;
+	}
+	render() {
+		if (!this._config) return A;
+		const defs = this._seriesDefs();
+		return b`
+      <ha-card class=${`text-${this._config.text_size ?? "large"}`}>
+        <div class="header">
+          <div><div class="title">${this._config.title ?? "Energy Analytics"}</div><div class="subtitle">Langzeitstatistik aus Home Assistant Recorder</div></div>
+          <div class="version">v${CARD_VERSION}</div>
+        </div>
+
+        <div class="range-tabs">
+          <button class=${this._range === "days" ? "active" : ""} @click=${() => this._range = "days"}>${this._config.day_count ?? 30} Tage</button>
+          <button class=${this._range === "months" ? "active" : ""} @click=${() => this._range = "months"}>${this._config.month_count ?? 12} Monate</button>
+          <button class=${this._range === "years" ? "active" : ""} @click=${() => this._range = "years"}>${this._config.year_count ?? 5} Jahre</button>
+          <button class="refresh" @click=${() => {
+			this._lastLoadKey = "";
+			this._loadStatistics();
+		}}>↻</button>
+        </div>
+
+        ${this._loading ? b`<div class="notice">Statistikdaten werden geladen …</div>` : A}
+        ${this._error ? b`<div class="notice error">${this._error}</div>` : A}
+        ${this._missingStatistics.length ? b`<div class="notice warn"><strong>Keine Long-Term-Statistics:</strong> ${this._missingStatistics.join(", ")}</div>` : A}
+
+        ${this._summary()}
+
+        <section class="panel">
+          <div class="panel-head"><div><h3>Energieverlauf</h3><p>Balken anklicken, um den Zeitraum unten im Detail zu öffnen.</p></div><span class="unit-badge">kWh</span></div>
+          <div class="series-buttons">
+            ${defs.map((def) => b`<button class=${this._enabledSeries.includes(def.key) ? `on series-${def.key}` : ""} @click=${() => this._toggleSeries(def.key)}>${def.label}</button>`)}
+          </div>
+          ${this._energyChart()}
+        </section>
+
+        ${this._pvEfficiencyChart()}
+        ${this._selectedDetail()}
+      </ha-card>
+    `;
+	}
+	static {
+		this.styles = i$3`
+    :host{display:block;--eac-pv:#f5a623;--eac-house:#00a6c7;--eac-grid:#4aa3df;--eac-export:#8bc34a;--eac-battery:#45b96f;--eac-heat:#e67e22;--eac-wallbox:#7f8c8d}
+    ha-card{padding:16px;overflow:hidden}
+    .header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.title{font-size:24px;font-weight:700}.subtitle,.version{color:var(--secondary-text-color);font-size:12px}.subtitle{margin-top:3px}
+    .text-normal{--metric-main:17px;--body:12px}.text-large{--metric-main:19px;--body:13px}.text-xlarge{--metric-main:21px;--body:14px}
+    .range-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.range-tabs button,.series-buttons button{border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--secondary-text-color);border-radius:10px;padding:8px 12px;cursor:pointer}.range-tabs button.active{color:var(--primary-text-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.range-tabs .refresh{margin-left:auto}
+    .notice{padding:10px 12px;border:1px solid var(--divider-color);border-radius:10px;margin-bottom:10px;color:var(--secondary-text-color)}.notice.error{border-color:var(--error-color);color:var(--error-color)}.notice.warn{border-color:var(--warning-color,#f5a623)}
+    .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}.metric{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--divider-color);border-radius:12px;background:color-mix(in srgb,var(--card-background-color) 96%,var(--primary-color) 4%)}.metric span{font-size:var(--body);color:var(--secondary-text-color)}.metric strong{font-size:var(--metric-main)}
+    .panel{border:1px solid var(--divider-color);border-radius:14px;padding:12px;margin-top:12px}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.panel h3{margin:0;font-size:17px}.panel h4{margin:16px 0 8px}.panel p{margin:3px 0 0;color:var(--secondary-text-color);font-size:12px}.unit-badge{font-size:11px;border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px;color:var(--secondary-text-color)}
+    .series-buttons{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0 4px}.series-buttons button{padding:6px 9px;font-size:11px}.series-buttons button.on{color:var(--primary-text-color);font-weight:600}.series-buttons button.on.series-pv_total{border-color:var(--eac-pv)}.series-buttons button.on.series-house{border-color:var(--eac-house)}.series-buttons button.on.series-grid_import{border-color:var(--eac-grid)}.series-buttons button.on.series-grid_export{border-color:var(--eac-export)}.series-buttons button.on.series-battery_charge,.series-buttons button.on.series-battery_discharge{border-color:var(--eac-battery)}.series-buttons button.on.series-heat_pump{border-color:var(--eac-heat)}.series-buttons button.on.series-wallbox{border-color:var(--eac-wallbox)}
+    .chart-shell{width:100%;overflow:hidden}.chart{display:block;width:100%;height:auto;min-height:220px}.gridline{stroke:var(--divider-color);stroke-width:1}.axis-label,.x-label,.axis-title{fill:var(--secondary-text-color);font-size:11px}.selected-band{fill:color-mix(in srgb,var(--primary-color) 9%,transparent)}.hit{fill:transparent;cursor:pointer}.bar{opacity:.88}.bar:hover{opacity:1}.series-pv_total{fill:var(--eac-pv)}.series-house{fill:var(--eac-house)}.series-grid_import{fill:var(--eac-grid)}.series-grid_export{fill:var(--eac-export)}.series-battery_charge,.series-battery_discharge{fill:var(--eac-battery)}.series-heat_pump{fill:var(--eac-heat)}.series-wallbox{fill:var(--eac-wallbox)}
+    .pv-0{fill:#f5a623;background:#f5a623}.pv-1{fill:#ffcc54;background:#ffcc54}.pv-2{fill:#d99000;background:#d99000}.pv-3{fill:#f08a24;background:#f08a24}.pv-4{fill:#b87500;background:#b87500}.legend-row{display:flex;flex-wrap:wrap;gap:10px;margin:9px 0 0;font-size:11px;color:var(--secondary-text-color)}.legend-row span{display:inline-flex;align-items:center;gap:5px}.legend-swatch{width:8px;height:8px;border-radius:2px;display:inline-block}
+    .metric-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:10px}.pv-table{display:grid;gap:8px}.pv-system-row{border:1px solid var(--divider-color);border-radius:11px;padding:10px;background:color-mix(in srgb,var(--card-background-color) 96%,var(--eac-pv) 4%)}.pv-system-title{display:flex;justify-content:space-between;gap:10px;align-items:center}.pv-system-title span{font-size:12px;color:var(--secondary-text-color)}.mppt-list{display:grid;gap:5px;margin-top:8px}.mppt-row{display:grid;grid-template-columns:1.3fr .8fr 1fr .65fr;gap:8px;padding:6px 7px;border-top:1px solid color-mix(in srgb,var(--divider-color) 65%,transparent);font-size:11px}.mppt-row span{color:var(--secondary-text-color)}.mppt-row strong{color:var(--primary-text-color)}
+    .empty{padding:30px;text-align:center;color:var(--secondary-text-color)}
+    @media(max-width:700px){ha-card{padding:10px}.title{font-size:21px}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:9px}.chart{min-height:190px}.range-tabs button{padding:7px 9px}.mppt-row{grid-template-columns:1fr 1fr}.pv-system-title{align-items:flex-start;flex-direction:column;gap:3px}}
+  `;
+	}
+};
+if (!customElements.get("energy-analytics-card")) customElements.define("energy-analytics-card", EnergyAnalyticsCard);
+window.customCards = window.customCards || [];
+if (!window.customCards.some((card) => card.type === "energy-analytics-card")) window.customCards.push({
+	type: "energy-analytics-card",
+	name: CARD_NAME,
+	description: "Long-term energy statistics, PV yield and kWh/kWp analytics using Home Assistant recorder statistics.",
+	preview: true,
+	configurable: true
+});
+console.info(`%c ${CARD_NAME} %c v${CARD_VERSION} `, "background:#f5a623;color:#111;font-weight:700;", "background:#222;color:white;");
+//#endregion
 
 //# sourceMappingURL=advanced-power-flow-card.js.map

@@ -1,3 +1,16 @@
+## 0.3.0
+
+- Added a second Lovelace card, `custom:energy-analytics-card`, to the same HACS package.
+- Added Home Assistant Recorder / Long-Term-Statistics loading through `recorder/statistics_during_period`.
+- Added selectable 30-day, 12-month and 5-year views with configurable window sizes.
+- Added interactive grouped bar charts for PV, house, grid import/export, battery charge/discharge, heat pump and wallbox energy.
+- Added a dedicated PV-efficiency chart using kWh/kWp so differently sized PV systems can be compared directly.
+- Added per-period PV-system and MPPT breakdown with kWh, kWh/kWp and production share.
+- Added per-period Autarky, Eigenverbrauch and heat-pump JAZ/COP calculations where the required long-term sensors exist.
+- Added Long-Term-Statistics metadata checks and warnings for configured sensors without recorder statistics.
+- Added a graphical configuration editor for the Analytics card, including dynamic PV systems and MPPTs.
+- Existing `custom:advanced-power-flow-card` remains available and compatible in the same compiled HACS JavaScript file.
+
 # Changelog
 
 ## 0.2.9

@@ -1,0 +1,45 @@
+type: custom:energy-analytics-card
+title: Energy Analytics
+default_range: days
+day_count: 30
+month_count: 12
+year_count: 5
+text_size: large
+
+energy:
+  pv_total: sensor.pv_energy_total
+  house: sensor.house_energy_total
+  grid_import: sensor.grid_import_total
+  grid_export: sensor.grid_export_total
+  battery_charge: sensor.battery_charge_energy_total
+  battery_discharge: sensor.battery_discharge_energy_total
+  heat_pump: sensor.heatpump_energy_total
+  heat_pump_thermal: sensor.heatpump_thermal_energy_total
+  wallbox: sensor.wallbox_energy_total
+
+solar:
+  - name: Hausdach
+    energy: sensor.goodwe_pv_generation_total
+    installed_kwp: 7.92
+    children:
+      - name: MPPT 1 Garten
+        energy: sensor.goodwe_mppt1_generation_total
+        installed_kwp: 4.95
+      - name: MPPT 2 Straße
+        energy: sensor.goodwe_mppt2_generation_total
+        installed_kwp: 2.97
+
+  - name: Garage
+    energy: sensor.victron_pv_generation_total
+    installed_kwp: 1.76
+    children:
+      - name: MPPT 1 Hinten
+        energy: sensor.victron_mppt1_generation_total
+        installed_kwp: 0.88
+      - name: MPPT 2 Straße
+        energy: sensor.victron_mppt2_generation_total
+        installed_kwp: 0.88
+
+  - name: Pavillon
+    energy: sensor.pavillon_generation_total
+    installed_kwp: 0.2

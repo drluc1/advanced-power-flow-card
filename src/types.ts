@@ -8,6 +8,7 @@ export interface HassEntity {
 
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
+  callWS?<T = unknown>(message: Record<string, unknown>): Promise<T>;
 }
 
 export interface PvInputConfig {

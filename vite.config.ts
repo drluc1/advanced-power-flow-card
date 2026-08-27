@@ -7,7 +7,7 @@ export default defineConfig({
     sourcemap: true,
     minify: false,
     lib: {
-      entry: "src/advanced-power-flow-card.ts",
+      entry: "src/index.ts",
       formats: ["es"],
       fileName: () => "advanced-power-flow-card.js"
     },

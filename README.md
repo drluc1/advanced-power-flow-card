@@ -1,8 +1,23 @@
-# Advanced Power Flow Card
+# Advanced Power Flow + Energy Analytics
 
-Flexible Home Assistant Lovelace power-flow card with dynamic PV systems, MPPTs, batteries, grid, house load, heat pump and additional consumers.
+One HACS dashboard package containing two Home Assistant Lovelace cards:
 
-## v0.2.9 highlights
+- `custom:advanced-power-flow-card` for live power flow, batteries, PV/MPPTs and consumers.
+- `custom:energy-analytics-card` for Recorder / Long-Term-Statistics charts and kWh/kWp analysis.
+
+## v0.3.0 highlights
+
+- New Energy Analytics Card with 30-day, 12-month and 5-year views.
+- Interactive energy bar chart for PV, house, grid, batteries, heat pump and wallbox.
+- PV-system efficiency chart in kWh/kWp.
+- Per-system and per-MPPT long-term analysis with kWh, kWh/kWp and production share.
+- Selected-period detail panel with Autarky, Eigenverbrauch and heat-pump JAZ when data is available.
+- Uses Home Assistant Long-Term Statistics directly; no separate database or backend integration is required.
+- Both cards are delivered through the same `advanced-power-flow-card.js`.
+
+See `example-energy-analytics.yaml` and `LONG-TERM-SENSORS.md` for setup.
+
+## Existing Power Flow features
 
 - Unlimited PV systems and MPPT/sub-PV inputs.
 - New `xlarge` typography mode plus independent mobile scaling from 0.90 to 1.30.

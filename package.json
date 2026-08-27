@@ -1,7 +1,7 @@
 {
   "name": "advanced-power-flow-card",
-  "version": "0.2.9",
-  "description": "Flexible Home Assistant power flow card with dynamic PV systems, batteries and consumers.",
+  "version": "0.3.0",
+  "description": "Home Assistant energy dashboard package with live power flow and long-term energy analytics.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
