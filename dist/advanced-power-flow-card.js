@@ -660,11 +660,13 @@ function normalizeConfig(input) {
 		battery_layout: raw.battery_layout === "separate" || raw.battery_layout === "grouped" ? raw.battery_layout : "grouped",
 		supply_node: raw.supply_node === "compact" || raw.supply_node === "hidden" || raw.supply_node === "full" ? raw.supply_node : "full",
 		flow_animation: raw.flow_animation === "system" || raw.flow_animation === "off" || raw.flow_animation === "always" ? raw.flow_animation : "always",
-		flow_routing: raw.flow_routing === "orthogonal" || raw.flow_routing === "curved" ? raw.flow_routing : "curved",
+		flow_routing: raw.flow_routing === "orthogonal" ? "orthogonal" : raw.flow_routing === "natural" || raw.flow_routing === "curved" ? "natural" : "natural",
 		visual_style: raw.visual_style === "classic" || raw.visual_style === "clean" ? raw.visual_style : "clean",
+		live_detail: raw.live_detail === "minimal" || raw.live_detail === "standard" ? raw.live_detail : "standard",
+		focus_active: typeof raw.focus_active === "boolean" ? raw.focus_active : true,
 		show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
 		show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
-		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
+		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "strip" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
 		daily_items: Array.isArray(raw.daily_items) ? raw.daily_items.filter((value) => typeof value === "string") : void 0,
 		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
 	};
@@ -774,8 +776,10 @@ function createStubConfig() {
 		battery_layout: "grouped",
 		supply_node: "full",
 		flow_animation: "always",
-		flow_routing: "curved",
+		flow_routing: "natural",
 		visual_style: "clean",
+		live_detail: "standard",
+		focus_active: true,
 		show_legend: true,
 		show_version: true,
 		daily_layout: "cards",
@@ -1099,8 +1103,8 @@ var AdvancedPowerFlowCardEditor = class extends i {
 			config.flow_animation = value;
 		}))}
           ${this._selectInput("Leitungsführung unten", this._config.flow_routing, [{
-			value: "curved",
-			label: "Kurvig – empfohlen"
+			value: "natural",
+			label: "Natürlich – direkte weiche Verbindung"
 		}, {
 			value: "orthogonal",
 			label: "Rechtwinklig / Bus"
@@ -1115,6 +1119,18 @@ var AdvancedPowerFlowCardEditor = class extends i {
 			label: "Classic – stärkere Konturen/Schatten"
 		}], (value) => this._with((config) => {
 			config.visual_style = value;
+		}))}
+          ${this._selectInput("Informationsdichte im Live-Diagramm", this._config.live_detail, [{
+			value: "standard",
+			label: "Standard – alle Unterzeilen"
+		}, {
+			value: "minimal",
+			label: "Minimal – nur wichtige Zusatzinfos"
+		}], (value) => this._with((config) => {
+			config.live_detail = value;
+		}))}
+          ${this._checkbox("Aktive Komponenten stärker hervorheben", this._config.focus_active, true, (value) => this._with((config) => {
+			config.focus_active = value;
 		}))}
           ${this._checkbox("Legende anzeigen", this._config.show_legend, true, (value) => this._with((config) => {
 			config.show_legend = value;
@@ -1135,15 +1151,19 @@ var AdvancedPowerFlowCardEditor = class extends i {
 			{
 				value: "compact",
 				label: "Kompakt"
+			},
+			{
+				value: "strip",
+				label: "Kennzahlenleiste – maximal reduziert"
 			}
 		], (value) => this._with((config) => {
 			config.daily_layout = value;
 		}))}
-          ${this._textInput("Tageskarten – Auswahl/Reihenfolge", (this._config.daily_items ?? []).join(", "), "pv, grid-import, grid-export, house, autarky, self-consumption, import-cost, export-revenue", (value) => this._with((config) => {
+          ${this._textInput("Tageskarten – Auswahl/Reihenfolge", (this._config.daily_items ?? []).join(", "), "pv, house, grid-import, grid-export, autarky, self-consumption, self-supplied-energy, self-supply-savings", (value) => this._with((config) => {
 			const items = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
 			config.daily_items = items.length ? items : void 0;
 		}))}
-          <div class="help">Leer = alle verfügbaren Tageswerte. Gültige Schlüssel: pv, grid-import, grid-export, house, autarky, self-consumption, import-price, export-price, import-cost, export-revenue.</div>
+          <div class="help">Leer = alle verfügbaren Tageswerte. Zusätzlich verfügbar: self-supplied-energy (Eigenversorgung PV+Batterie) und self-supply-savings (vermiedene Netzstromkosten).</div>
           ${this._checkbox("PV bei Nacht stärker ausblenden", this._config.night_mode, true, (value) => this._with((config) => {
 			config.night_mode = value;
 		}))}
@@ -1384,6 +1404,12 @@ var AdvancedPowerFlowCardEditor = class extends i {
 				export_revenue_today: value
 			};
 		}))}
+            ${this._entityPicker("Eigenversorgungs-Ersparnis heute (optional)", this._config.tariffs?.self_supply_savings_today, (value) => this._with((config) => {
+			config.tariffs = {
+				...config.tariffs,
+				self_supply_savings_today: value
+			};
+		}))}
             ${this._optionalNumberInput("Fester Bezugspreis [€/kWh]", this._config.tariffs?.fixed_import_price, "optional", (value) => this._with((config) => {
 			config.tariffs = {
 				...config.tariffs,
@@ -1408,7 +1434,7 @@ var AdvancedPowerFlowCardEditor = class extends i {
 				currency: value
 			};
 		}))}
-            <div class="help">Tageskosten werden bevorzugt aus eigenen Kosten-/Erlös-Entities gelesen. Mit festen Preisen kann die Card alternativ aus den Tages-kWh schätzen. Ein dynamischer aktueller Preis wird bewusst nicht rückwirkend auf den ganzen Tag angewendet.</div>
+            <div class="help">Eigenversorgung = Hausverbrauch minus Netzbezug. Die daraus vermiedenen Netzstromkosten werden bevorzugt aus einer eigenen Ersparnis-Entity gelesen; alternativ mit festem Bezugspreis berechnet. Bei dynamischen Preisen kann nur eine Näherung aus dem aktuellen bzw. bisherigen Durchschnittspreis erfolgen.</div>
           </div>
         </section>
 
@@ -1679,7 +1705,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME$1 = "Advanced Power Flow Card";
-var CARD_VERSION$1 = "0.3.4";
+var CARD_VERSION$1 = "0.3.5";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -2294,6 +2320,58 @@ var AdvancedPowerFlowCard = class extends i {
 		const energyWh = this._energyWh(energyEntity);
 		return energyWh === void 0 ? void 0 : energyWh / 1e3 * fixedPrice;
 	}
+	_pricePerKwh(entity) {
+		const value = this._number(entity);
+		if (value === void 0 || value < 0) return void 0;
+		const unit = this._unit(entity).toLowerCase().replace(/\s+/g, "");
+		if (unit.includes("ct/kwh") || unit.includes("cent/kwh") || unit.includes("c/kwh")) return value / 100;
+		if (unit.includes("/mwh")) return value / 1e3;
+		return value;
+	}
+	_dailySelfSupplyInfo() {
+		const balance = this._dailyBalanceInfo();
+		let houseWh = balance.house;
+		const gridImportWh = balance.gridImport;
+		if (houseWh === void 0 && balance.pv !== void 0 && balance.gridImport !== void 0 && balance.gridExport !== void 0 && balance.batteryCharge !== void 0 && balance.batteryDischarge !== void 0) houseWh = Math.max(0, balance.pv + balance.gridImport + balance.batteryDischarge - balance.gridExport - balance.batteryCharge);
+		const energyWh = houseWh !== void 0 && gridImportWh !== void 0 ? Math.max(0, houseWh - gridImportWh) : void 0;
+		const explicitEntity = this._config.tariffs?.self_supply_savings_today;
+		const explicitSavings = this._number(explicitEntity);
+		if (explicitEntity && explicitSavings !== void 0) return {
+			energyWh,
+			savings: explicitSavings,
+			savingsEntity: explicitEntity,
+			estimated: false
+		};
+		if (energyWh === void 0) return { estimated: false };
+		const fixedPrice = this._config.tariffs?.fixed_import_price;
+		if (fixedPrice !== void 0 && fixedPrice >= 0) return {
+			energyWh,
+			savings: energyWh / 1e3 * fixedPrice,
+			estimated: false,
+			pricePerKwh: fixedPrice
+		};
+		const importCost = this._number(this._config.tariffs?.import_cost_today);
+		if (importCost !== void 0 && gridImportWh !== void 0 && gridImportWh > 1) {
+			const averagePrice = importCost / (gridImportWh / 1e3);
+			if (Number.isFinite(averagePrice) && averagePrice >= 0) return {
+				energyWh,
+				savings: energyWh / 1e3 * averagePrice,
+				estimated: true,
+				pricePerKwh: averagePrice
+			};
+		}
+		const currentPrice = this._pricePerKwh(this._config.tariffs?.import_price);
+		if (currentPrice !== void 0) return {
+			energyWh,
+			savings: energyWh / 1e3 * currentPrice,
+			estimated: true,
+			pricePerKwh: currentPrice
+		};
+		return {
+			energyWh,
+			estimated: false
+		};
+	}
 	_batteryHealthLabel(battery) {
 		const warnings = this._batteryWarnings(battery);
 		const soh = this._number(battery.state_of_health);
@@ -2487,6 +2565,26 @@ var AdvancedPowerFlowCard = class extends i {
 			key: "self-consumption",
 			label: "Eigenverbrauch",
 			value: this._formatPercent(selfConsumption)
+		});
+		const selfSupply = this._dailySelfSupplyInfo();
+		if (selfSupply.energyWh !== void 0) items.push({
+			key: "self-supplied-energy",
+			label: "Eigenversorgung",
+			value: this._formatEnergyWh(selfSupply.energyWh),
+			expandable: true
+		});
+		if (selfSupply.savingsEntity) items.push({
+			key: "self-supply-savings",
+			label: "Stromersparnis",
+			value: this._formatMoneyEntity(selfSupply.savingsEntity),
+			entity: selfSupply.savingsEntity,
+			expandable: true
+		});
+		else if (selfSupply.savings !== void 0) items.push({
+			key: "self-supply-savings",
+			label: "Stromersparnis",
+			value: this._formatMoney(selfSupply.savings, selfSupply.estimated),
+			expandable: true
 		});
 		if (tariffs?.import_price) items.push({
 			key: "import-price",
@@ -3019,7 +3117,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const animate = direction !== "off" && this._flowAnimationEnabled();
 		const offset = direction === "reverse" ? 50 : -50;
 		return w`
-      <path d=${d} class=${`flow-base ${focusClass}`}></path>
+      <path d=${d} class=${`flow-base ${direction} ${focusClass}`}></path>
       <path
         d=${d}
         class=${`flow ${direction} ${focusClass}`}
@@ -3100,7 +3198,7 @@ var AdvancedPowerFlowCard = class extends i {
             </g>
           ` : A}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
-        ${node.sub ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>` : A}
+        ${node.sub && (this._config.live_detail !== "minimal" || node.kind === "battery" || node.kind === "heat" || node.kind === "pv-parent") ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>` : A}
         ${node.sub2 ? w`<text x=${node.x + 14} y=${subY + 17} class="node-sub node-sub-secondary">${this._short(node.sub2, 42)}</text>` : A}
         ${node.compactMppts?.length ? w`
             <g class="compact-mppt-list">
@@ -3236,13 +3334,13 @@ var AdvancedPowerFlowCard = class extends i {
 		const y1 = from.y + from.h;
 		const x2 = to.x + to.w / 2;
 		const y2 = to.y;
-		const busX = source === "house" ? width - 24 : 24;
-		const departureY = y1 + 24;
-		const targetLaneY = Math.max(departureY + 12, y2 - 22);
-		if ((this._config.flow_routing ?? "curved") === "orthogonal") return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
-		const firstControlY = y1 + Math.max(14, (departureY - y1) * .7);
-		const secondControlY = Math.max(departureY + 10, targetLaneY - 16);
-		return `M ${x1} ${y1} C ${x1} ${firstControlY}, ${busX} ${departureY - 8}, ${busX} ${departureY} C ${busX} ${secondControlY}, ${x2} ${targetLaneY - 14}, ${x2} ${y2}`;
+		if ((this._config.flow_routing ?? "natural") === "orthogonal") {
+			const midY = y1 + Math.max(22, (y2 - y1) * .42);
+			return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
+		}
+		const distance = Math.max(24, y2 - y1);
+		const control = Math.min(70, Math.max(28, distance * .42));
+		return `M ${x1} ${y1} C ${x1} ${y1 + control}, ${x2} ${y2 - control}, ${x2} ${y2}`;
 	}
 	_detailItem(label, entity, fallbackUnit = "") {
 		if (!entity) return A;
@@ -3507,6 +3605,28 @@ var AdvancedPowerFlowCard = class extends i {
             ${usage !== void 0 ? b`<div class="daily-balance-total"><span>Summe Verwendung</span><strong>${this._formatEnergyWh(usage)}</strong></div>` : A}
           </div>
         </div>
+
+        ${(() => {
+			const selfSupply = this._dailySelfSupplyInfo();
+			if (selfSupply.energyWh === void 0) return A;
+			const savingsText = selfSupply.savingsEntity ? this._formatMoneyEntity(selfSupply.savingsEntity) : selfSupply.savings !== void 0 ? this._formatMoney(selfSupply.savings, selfSupply.estimated) : "—";
+			return b`
+            <div class="self-supply-card">
+              <div>
+                <span>Eigenversorgung durch PV + Batterie</span>
+                <strong>${this._formatEnergyWh(selfSupply.energyWh)}</strong>
+              </div>
+              <div>
+                <span>Vermiedene Netzstromkosten</span>
+                <strong>${savingsText}</strong>
+              </div>
+              ${selfSupply.pricePerKwh !== void 0 ? b`<small>Bewertet mit ${selfSupply.pricePerKwh.toLocaleString(void 0, {
+				minimumFractionDigits: 3,
+				maximumFractionDigits: 3
+			})} ${this._currency()}/kWh${selfSupply.estimated ? " (Näherung)" : ""}</small>` : b`<small>Für eine Geldersparnis festen Bezugspreis oder eine Ersparnis-Entity konfigurieren.</small>`}
+            </div>
+          `;
+		})()}
 
         ${info.complete && info.residual !== void 0 ? b`
             <div class=${`daily-balance-residual ${Math.abs(info.residual) > 100 ? "warning" : "ok"}`}>
@@ -3777,7 +3897,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} ${this._groupedPvLayout() ? "pv-grouped" : this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} live-${this._config.live_detail ?? "standard"} ${this._config.focus_active === false ? "" : "focus-active"} ${this._groupedPvLayout() ? "pv-grouped" : this._compactPvLayout() ? "pv-compact" : "pv-expanded"} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -3810,7 +3930,11 @@ var AdvancedPowerFlowCard = class extends i {
 				}
 				return;
 			}
-			if (item.key === "house" && item.expandable) {
+			if ([
+				"house",
+				"self-supplied-energy",
+				"self-supply-savings"
+			].includes(item.key) && item.expandable) {
 				const next = !this._dailyBalanceExpanded;
 				this._dailyBalanceExpanded = next;
 				if (next) {
@@ -4522,6 +4646,30 @@ var AdvancedPowerFlowCard = class extends i {
       opacity: .48;
     }
 
+
+    ha-card.focus-active .node.idle:not(.warning) {
+      opacity: .48;
+    }
+
+    ha-card.focus-active .node.active:not(.warning) .node-bg {
+      stroke-width: 1.7;
+      stroke: color-mix(in srgb, var(--primary-color) 48%, var(--divider-color));
+    }
+
+    ha-card.focus-active .flow-base.off {
+      opacity: .13;
+    }
+
+    ha-card.focus-active .flow.off {
+      opacity: 0;
+    }
+
+    ha-card.live-minimal .node.consumer .node-bg,
+    ha-card.live-minimal .node.grid .node-bg,
+    ha-card.live-minimal .node.house .node-bg {
+      filter: none;
+    }
+
     .legend span {
       display: inline-flex;
       align-items: center;
@@ -4734,6 +4882,38 @@ var AdvancedPowerFlowCard = class extends i {
     .daily-summary.daily-compact .daily-item strong { font-size: 13px; }
     .daily-summary.daily-compact .daily-item-label { gap: 4px; }
 
+    .daily-summary.daily-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+      gap: 0;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--divider-color) 82%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--secondary-background-color) 42%, transparent);
+    }
+
+    .daily-summary.daily-strip .daily-item {
+      min-height: 52px;
+      padding: 7px 9px;
+      border: 0;
+      border-right: 1px solid color-mix(in srgb, var(--divider-color) 68%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--divider-color) 68%, transparent);
+      border-radius: 0;
+      background: transparent;
+    }
+
+    .daily-summary.daily-strip .daily-item:hover {
+      background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+    }
+
+    .daily-summary.daily-strip .daily-item strong {
+      font-size: max(13px, calc(var(--apfc-subtitle-size) * .94));
+    }
+
+    .daily-summary.daily-strip .daily-item span {
+      font-size: max(10px, calc(var(--apfc-subtitle-size) * .70));
+    }
+
     .diagnostic-summary-button {
       border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 42%, var(--divider-color));
       border-radius: 999px;
@@ -4903,6 +5083,22 @@ var AdvancedPowerFlowCard = class extends i {
       line-height: 1.45;
     }
 
+    .self-supply-card {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 28%, var(--divider-color));
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--apfc-battery) 5%, transparent);
+    }
+
+    .self-supply-card > div { display: grid; gap: 3px; }
+    .self-supply-card span, .self-supply-card small { color: var(--secondary-text-color); font-size: 11px; }
+    .self-supply-card strong { color: var(--primary-text-color); font-size: 15px; }
+    .self-supply-card small { grid-column: 1 / -1; line-height: 1.4; }
+
     .diagnostic-list { display: grid; gap: 8px; }
     .diagnostic-row {
       display: flex;
@@ -4960,6 +5156,9 @@ var AdvancedPowerFlowCard = class extends i {
         padding: 6px 8px;
       }
       .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
+      .daily-summary.daily-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .daily-summary.daily-strip .daily-item { min-height: 48px; padding: 6px 8px; }
+      .self-supply-card { grid-template-columns: 1fr 1fr; padding: 10px; }
       .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
       .daily-balance-columns { grid-template-columns: 1fr; }
       .daily-balance-residual { align-items: flex-start; }

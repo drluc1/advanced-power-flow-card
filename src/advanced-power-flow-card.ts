@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.4";
+const CARD_VERSION = "0.3.5";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -968,6 +968,93 @@ export class AdvancedPowerFlowCard extends LitElement {
     return energyWh === undefined ? undefined : energyWh / 1000 * fixedPrice;
   }
 
+  private _pricePerKwh(entity?: string): number | undefined {
+    const value = this._number(entity);
+    if (value === undefined || value < 0) return undefined;
+    const unit = this._unit(entity).toLowerCase().replace(/\s+/g, "");
+    if (unit.includes("ct/kwh") || unit.includes("cent/kwh") || unit.includes("c/kwh")) return value / 100;
+    if (unit.includes("/mwh")) return value / 1000;
+    return value;
+  }
+
+  private _dailySelfSupplyInfo(): {
+    energyWh?: number;
+    savings?: number;
+    savingsEntity?: string;
+    estimated: boolean;
+    pricePerKwh?: number;
+  } {
+    const balance = this._dailyBalanceInfo();
+    let houseWh = balance.house;
+    const gridImportWh = balance.gridImport;
+
+    if (
+      houseWh === undefined &&
+      balance.pv !== undefined &&
+      balance.gridImport !== undefined &&
+      balance.gridExport !== undefined &&
+      balance.batteryCharge !== undefined &&
+      balance.batteryDischarge !== undefined
+    ) {
+      houseWh = Math.max(
+        0,
+        balance.pv + balance.gridImport + balance.batteryDischarge - balance.gridExport - balance.batteryCharge
+      );
+    }
+
+    const energyWh = houseWh !== undefined && gridImportWh !== undefined
+      ? Math.max(0, houseWh - gridImportWh)
+      : undefined;
+
+    const explicitEntity = this._config.tariffs?.self_supply_savings_today;
+    const explicitSavings = this._number(explicitEntity);
+    if (explicitEntity && explicitSavings !== undefined) {
+      return {
+        energyWh,
+        savings: explicitSavings,
+        savingsEntity: explicitEntity,
+        estimated: false
+      };
+    }
+
+    if (energyWh === undefined) return { estimated: false };
+
+    const fixedPrice = this._config.tariffs?.fixed_import_price;
+    if (fixedPrice !== undefined && fixedPrice >= 0) {
+      return {
+        energyWh,
+        savings: energyWh / 1000 * fixedPrice,
+        estimated: false,
+        pricePerKwh: fixedPrice
+      };
+    }
+
+    const importCost = this._number(this._config.tariffs?.import_cost_today);
+    if (importCost !== undefined && gridImportWh !== undefined && gridImportWh > 1) {
+      const averagePrice = importCost / (gridImportWh / 1000);
+      if (Number.isFinite(averagePrice) && averagePrice >= 0) {
+        return {
+          energyWh,
+          savings: energyWh / 1000 * averagePrice,
+          estimated: true,
+          pricePerKwh: averagePrice
+        };
+      }
+    }
+
+    const currentPrice = this._pricePerKwh(this._config.tariffs?.import_price);
+    if (currentPrice !== undefined) {
+      return {
+        energyWh,
+        savings: energyWh / 1000 * currentPrice,
+        estimated: true,
+        pricePerKwh: currentPrice
+      };
+    }
+
+    return { energyWh, estimated: false };
+  }
+
   private _batteryHealthLabel(battery: BatteryConfig): string {
     const warnings = this._batteryWarnings(battery);
     const soh = this._number(battery.state_of_health);
@@ -1187,6 +1274,32 @@ export class AdvancedPowerFlowCard extends LitElement {
     if (autarky !== undefined) items.push({ key: "autarky", label: "Autarkie", value: this._formatPercent(autarky) });
     const selfConsumption = this._selfConsumptionPercent();
     if (selfConsumption !== undefined) items.push({ key: "self-consumption", label: "Eigenverbrauch", value: this._formatPercent(selfConsumption) });
+
+    const selfSupply = this._dailySelfSupplyInfo();
+    if (selfSupply.energyWh !== undefined) {
+      items.push({
+        key: "self-supplied-energy",
+        label: "Eigenversorgung",
+        value: this._formatEnergyWh(selfSupply.energyWh),
+        expandable: true
+      });
+    }
+    if (selfSupply.savingsEntity) {
+      items.push({
+        key: "self-supply-savings",
+        label: "Stromersparnis",
+        value: this._formatMoneyEntity(selfSupply.savingsEntity),
+        entity: selfSupply.savingsEntity,
+        expandable: true
+      });
+    } else if (selfSupply.savings !== undefined) {
+      items.push({
+        key: "self-supply-savings",
+        label: "Stromersparnis",
+        value: this._formatMoney(selfSupply.savings, selfSupply.estimated),
+        expandable: true
+      });
+    }
 
     if (tariffs?.import_price) {
       items.push({
@@ -1881,7 +1994,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     // on Android/WebView/tablet browsers, where CSS dash animations may be
     // frozen even though the line itself renders correctly.
     return svg`
-      <path d=${d} class=${`flow-base ${focusClass}`}></path>
+      <path d=${d} class=${`flow-base ${direction} ${focusClass}`}></path>
       <path
         d=${d}
         class=${`flow ${direction} ${focusClass}`}
@@ -1967,7 +2080,7 @@ export class AdvancedPowerFlowCard extends LitElement {
           `
           : nothing}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
-        ${node.sub
+        ${node.sub && (this._config.live_detail !== "minimal" || node.kind === "battery" || node.kind === "heat" || node.kind === "pv-parent")
           ? svg`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>`
           : nothing}
         ${node.sub2
@@ -2129,20 +2242,17 @@ export class AdvancedPowerFlowCard extends LitElement {
     const y1 = from.y + from.h;
     const x2 = to.x + to.w / 2;
     const y2 = to.y;
-    const busX = source === "house" ? width - 24 : 24;
-    const departureY = y1 + 24;
-    const targetLaneY = Math.max(departureY + 12, y2 - 22);
 
-    if ((this._config.flow_routing ?? "curved") === "orthogonal") {
-      return `M ${x1} ${y1} L ${x1} ${departureY} L ${busX} ${departureY} L ${busX} ${targetLaneY} L ${x2} ${targetLaneY} L ${x2} ${y2}`;
+    if ((this._config.flow_routing ?? "natural") === "orthogonal") {
+      const midY = y1 + Math.max(22, (y2 - y1) * 0.42);
+      return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
     }
 
-    // Keep the safe side-bus concept, but round the whole branch into two
-    // broad Bezier curves. This retains clearance around grouped nodes while
-    // looking much less like wiring-diagram right angles.
-    const firstControlY = y1 + Math.max(14, (departureY - y1) * 0.7);
-    const secondControlY = Math.max(departureY + 10, targetLaneY - 16);
-    return `M ${x1} ${y1} C ${x1} ${firstControlY}, ${busX} ${departureY - 8}, ${busX} ${departureY} C ${busX} ${secondControlY}, ${x2} ${targetLaneY - 14}, ${x2} ${y2}`;
+    // Natural direct connection: one gentle S-curve between the source and
+    // destination. No detour to a side bus, no pronounced hook/bend.
+    const distance = Math.max(24, y2 - y1);
+    const control = Math.min(70, Math.max(28, distance * 0.42));
+    return `M ${x1} ${y1} C ${x1} ${y1 + control}, ${x2} ${y2 - control}, ${x2} ${y2}`;
   }
 
   private _detailItem(label: string, entity?: string, fallbackUnit = "") {
@@ -2536,6 +2646,31 @@ export class AdvancedPowerFlowCard extends LitElement {
           </div>
         </div>
 
+        ${(() => {
+          const selfSupply = this._dailySelfSupplyInfo();
+          if (selfSupply.energyWh === undefined) return nothing;
+          const savingsText = selfSupply.savingsEntity
+            ? this._formatMoneyEntity(selfSupply.savingsEntity)
+            : selfSupply.savings !== undefined
+              ? this._formatMoney(selfSupply.savings, selfSupply.estimated)
+              : "—";
+          return html`
+            <div class="self-supply-card">
+              <div>
+                <span>Eigenversorgung durch PV + Batterie</span>
+                <strong>${this._formatEnergyWh(selfSupply.energyWh)}</strong>
+              </div>
+              <div>
+                <span>Vermiedene Netzstromkosten</span>
+                <strong>${savingsText}</strong>
+              </div>
+              ${selfSupply.pricePerKwh !== undefined
+                ? html`<small>Bewertet mit ${selfSupply.pricePerKwh.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${this._currency()}/kWh${selfSupply.estimated ? " (Näherung)" : ""}</small>`
+                : html`<small>Für eine Geldersparnis festen Bezugspreis oder eine Ersparnis-Entity konfigurieren.</small>`}
+            </div>
+          `;
+        })()}
+
         ${info.complete && info.residual !== undefined
           ? html`
             <div class=${`daily-balance-residual ${Math.abs(info.residual) > 100 ? "warning" : "ok"}`}>
@@ -2814,7 +2949,7 @@ export class AdvancedPowerFlowCard extends LitElement {
 
     return html`
       <ha-card
-        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} ${this._groupedPvLayout() ? "pv-grouped" : (this._compactPvLayout() ? "pv-compact" : "pv-expanded")} ${this._isPvNight() ? "pv-night" : ""}`}
+        class=${`text-${this._config.text_size ?? "large"} density-${this._config.layout_density ?? "auto"} visual-${this._config.visual_style ?? "clean"} live-${this._config.live_detail ?? "standard"} ${this._config.focus_active === false ? "" : "focus-active"} ${this._groupedPvLayout() ? "pv-grouped" : (this._compactPvLayout() ? "pv-compact" : "pv-expanded")} ${this._isPvNight() ? "pv-night" : ""}`}
         style=${this._cardStyle()}
       >
         <div class="header">
@@ -2848,7 +2983,7 @@ export class AdvancedPowerFlowCard extends LitElement {
                       }
                       return;
                     }
-                    if (item.key === "house" && item.expandable) {
+                    if (["house", "self-supplied-energy", "self-supply-savings"].includes(item.key) && item.expandable) {
                       const next = !this._dailyBalanceExpanded;
                       this._dailyBalanceExpanded = next;
                       if (next) {
@@ -3633,6 +3768,30 @@ export class AdvancedPowerFlowCard extends LitElement {
       opacity: .48;
     }
 
+
+    ha-card.focus-active .node.idle:not(.warning) {
+      opacity: .48;
+    }
+
+    ha-card.focus-active .node.active:not(.warning) .node-bg {
+      stroke-width: 1.7;
+      stroke: color-mix(in srgb, var(--primary-color) 48%, var(--divider-color));
+    }
+
+    ha-card.focus-active .flow-base.off {
+      opacity: .13;
+    }
+
+    ha-card.focus-active .flow.off {
+      opacity: 0;
+    }
+
+    ha-card.live-minimal .node.consumer .node-bg,
+    ha-card.live-minimal .node.grid .node-bg,
+    ha-card.live-minimal .node.house .node-bg {
+      filter: none;
+    }
+
     .legend span {
       display: inline-flex;
       align-items: center;
@@ -3845,6 +4004,38 @@ export class AdvancedPowerFlowCard extends LitElement {
     .daily-summary.daily-compact .daily-item strong { font-size: 13px; }
     .daily-summary.daily-compact .daily-item-label { gap: 4px; }
 
+    .daily-summary.daily-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+      gap: 0;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--divider-color) 82%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--secondary-background-color) 42%, transparent);
+    }
+
+    .daily-summary.daily-strip .daily-item {
+      min-height: 52px;
+      padding: 7px 9px;
+      border: 0;
+      border-right: 1px solid color-mix(in srgb, var(--divider-color) 68%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--divider-color) 68%, transparent);
+      border-radius: 0;
+      background: transparent;
+    }
+
+    .daily-summary.daily-strip .daily-item:hover {
+      background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+    }
+
+    .daily-summary.daily-strip .daily-item strong {
+      font-size: max(13px, calc(var(--apfc-subtitle-size) * .94));
+    }
+
+    .daily-summary.daily-strip .daily-item span {
+      font-size: max(10px, calc(var(--apfc-subtitle-size) * .70));
+    }
+
     .diagnostic-summary-button {
       border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 42%, var(--divider-color));
       border-radius: 999px;
@@ -4014,6 +4205,22 @@ export class AdvancedPowerFlowCard extends LitElement {
       line-height: 1.45;
     }
 
+    .self-supply-card {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--apfc-battery) 28%, var(--divider-color));
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--apfc-battery) 5%, transparent);
+    }
+
+    .self-supply-card > div { display: grid; gap: 3px; }
+    .self-supply-card span, .self-supply-card small { color: var(--secondary-text-color); font-size: 11px; }
+    .self-supply-card strong { color: var(--primary-text-color); font-size: 15px; }
+    .self-supply-card small { grid-column: 1 / -1; line-height: 1.4; }
+
     .diagnostic-list { display: grid; gap: 8px; }
     .diagnostic-row {
       display: flex;
@@ -4071,6 +4278,9 @@ export class AdvancedPowerFlowCard extends LitElement {
         padding: 6px 8px;
       }
       .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
+      .daily-summary.daily-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .daily-summary.daily-strip .daily-item { min-height: 48px; padding: 6px 8px; }
+      .self-supply-card { grid-template-columns: 1fr 1fr; padding: 10px; }
       .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
       .daily-balance-columns { grid-template-columns: 1fr; }
       .daily-balance-residual { align-items: flex-start; }

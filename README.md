@@ -371,3 +371,58 @@ show_version: true
 - `classic`: bisheriger kräftigerer Stil
 
 Legende und Versionsnummer können bei besonders kompakten Dashboards separat ausgeblendet werden.
+
+## v0.3.5 – natürliche Leitungen und Eigenversorgungs-Ersparnis
+
+Für eine besonders reduzierte Live-Ansicht:
+
+```yaml
+flow_routing: natural
+visual_style: clean
+live_detail: minimal
+focus_active: true
+daily_layout: strip
+```
+
+`flow_routing: natural` verbindet Batterien und Verbraucher direkt mit einer sanften S-Kurve. Es gibt keine seitlichen Bus-Umwege mehr.
+
+Die Card kann außerdem die heute selbst bereitgestellte Energie berechnen:
+
+```text
+Eigenversorgung = Hausverbrauch heute - Netzbezug heute
+```
+
+Damit wird der Anteil des Hausverbrauchs erfasst, der heute durch PV und Batterie statt durch direkten Netzbezug gedeckt wurde. Eine exakte Aufteilung zwischen direkter PV-Nutzung und Batterie ist aus reinen Tageszählern nicht möglich.
+
+Mit einem festen Bezugspreis:
+
+```yaml
+tariffs:
+  fixed_import_price: 0.31
+  currency: "€"
+```
+
+wird zusätzlich berechnet:
+
+```text
+Stromersparnis = Eigenversorgung [kWh] × Bezugspreis [€/kWh]
+```
+
+Alternativ kann eine eigene, bereits exakt berechnete Kosten-Entity angegeben werden:
+
+```yaml
+tariffs:
+  self_supply_savings_today: sensor.eigenversorgung_ersparnis_heute
+```
+
+Die neuen Tageskarten können über `daily_items` platziert werden:
+
+```yaml
+daily_items:
+  - pv
+  - house
+  - self-supplied-energy
+  - self-supply-savings
+  - grid-import
+  - autarky
+```

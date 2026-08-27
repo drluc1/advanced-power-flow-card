@@ -85,6 +85,7 @@ export interface TariffConfig {
   export_price?: string;
   import_cost_today?: string;
   export_revenue_today?: string;
+  self_supply_savings_today?: string;
   fixed_import_price?: number;
   fixed_export_price?: number;
   currency?: string;
@@ -114,15 +115,16 @@ export interface CardColorsConfig {
 }
 
 export type TextSize = "small" | "normal" | "large" | "xlarge";
-export type DailyLayout = "auto" | "cards" | "compact";
+export type DailyLayout = "auto" | "cards" | "compact" | "strip";
 export type LayoutDensity = "auto" | "compact" | "comfortable";
 export type PvLayoutMode = "auto" | "expanded" | "compact" | "grouped";
 export type PvDetailLevel = "auto" | "minimal" | "compact" | "full";
 export type SupplyNodeMode = "full" | "compact" | "hidden";
 export type BatteryLayoutMode = "grouped" | "separate";
 export type FlowAnimationMode = "always" | "system" | "off";
-export type FlowRoutingMode = "curved" | "orthogonal";
+export type FlowRoutingMode = "natural" | "curved" | "orthogonal";
 export type VisualStyle = "clean" | "classic";
+export type LiveDetailMode = "standard" | "minimal";
 export type DailyItemKey =
   | "pv"
   | "grid-import"
@@ -133,7 +135,9 @@ export type DailyItemKey =
   | "import-price"
   | "export-price"
   | "import-cost"
-  | "export-revenue";
+  | "export-revenue"
+  | "self-supplied-energy"
+  | "self-supply-savings";
 
 export interface HeatPumpConfig extends ConsumerConfig {
   flow_temperature?: string;
@@ -186,6 +190,8 @@ export interface AdvancedPowerFlowCardConfig {
   flow_animation?: FlowAnimationMode;
   flow_routing?: FlowRoutingMode;
   visual_style?: VisualStyle;
+  live_detail?: LiveDetailMode;
+  focus_active?: boolean;
   show_legend?: boolean;
   show_version?: boolean;
   night_mode?: boolean;

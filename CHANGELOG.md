@@ -1,3 +1,16 @@
+## 0.3.5
+
+- Untere Batterie-/Verbraucher-Verbindungen auf direkte, natürliche S-Kurven ohne seitliche Bus-Umwege umgestellt.
+- `flow_routing: natural` als neuer Standard; `orthogonal` bleibt optional. Alte `curved`-Konfigurationen werden automatisch auf `natural` migriert.
+- Neue `daily_layout: strip`-Ansicht für eine reduzierte Kennzahlenleiste.
+- Neuer `live_detail: minimal`-Modus: unwichtige Untertexte im Live-Diagramm werden ausgeblendet, Batterie-, Wärmepumpen- und PV-Kerninfos bleiben erhalten.
+- `focus_active` hebt aktive Komponenten stärker hervor und nimmt inaktive Elemente deutlicher zurück.
+- Neue Tageskennzahl `Eigenversorgung`: Hausverbrauch minus Netzbezug = durch PV/Batterie gedeckter Verbrauch.
+- Neue Tageskennzahl `Stromersparnis`: vermiedene Netzstromkosten durch Eigenversorgung.
+- Optionaler Sensor `tariffs.self_supply_savings_today` für eine extern exakt berechnete Ersparnis.
+- Alternativ berechnet die Card die Ersparnis aus `fixed_import_price`; bei dynamischen Preisen wird eine Näherung über Tageskosten/Durchschnitt oder aktuellen Preis gekennzeichnet.
+- Energie-Tagesbilanz um Eigenversorgung und vermiedene Netzstromkosten erweitert.
+
 ## 0.3.4
 
 - Energieflussanimation von CSS-Keyframes auf SVG/SMIL umgestellt; behebt feststehende Dash-Animationen in vielen Android-/Tablet-WebViews.

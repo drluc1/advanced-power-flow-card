@@ -145,17 +145,21 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
         ? raw.flow_animation
         : "always",
     flow_routing:
-      raw.flow_routing === "orthogonal" || raw.flow_routing === "curved"
-        ? raw.flow_routing
-        : "curved",
+      raw.flow_routing === "orthogonal"
+        ? "orthogonal"
+        : raw.flow_routing === "natural" || raw.flow_routing === "curved"
+          ? "natural"
+          : "natural",
     visual_style:
       raw.visual_style === "classic" || raw.visual_style === "clean"
         ? raw.visual_style
         : "clean",
+    live_detail: raw.live_detail === "minimal" || raw.live_detail === "standard" ? raw.live_detail : "standard",
+    focus_active: typeof raw.focus_active === "boolean" ? raw.focus_active : true,
     show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
     show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
     daily_layout:
-      raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "auto"
+      raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "strip" || raw.daily_layout === "auto"
         ? raw.daily_layout
         : "cards",
     daily_items: Array.isArray(raw.daily_items)
@@ -238,8 +242,10 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     battery_layout: "grouped",
     supply_node: "full",
     flow_animation: "always",
-    flow_routing: "curved",
+    flow_routing: "natural",
     visual_style: "clean",
+    live_detail: "standard",
+    focus_active: true,
     show_legend: true,
     show_version: true,
     daily_layout: "cards",

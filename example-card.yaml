@@ -14,13 +14,17 @@ night_pv_collapse: true
 battery_layout: grouped
 supply_node: full
 flow_animation: always
-flow_routing: curved
+flow_routing: natural
 visual_style: clean
+live_detail: standard
+focus_active: true
 show_legend: true
 show_version: true
 daily_items:
   - pv
   - house
+  - self-supplied-energy
+  - self-supply-savings
   - grid-import
   - grid-export
   - autarky

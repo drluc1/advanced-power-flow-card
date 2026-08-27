@@ -236,31 +236,37 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             { value: "off", label: "Aus" }
           ], (value) => this._with((config) => { config.flow_animation = value as "always" | "system" | "off"; }))}
           ${this._selectInput("Leitungsführung unten", this._config.flow_routing, [
-            { value: "curved", label: "Kurvig – empfohlen" },
+            { value: "natural", label: "Natürlich – direkte weiche Verbindung" },
             { value: "orthogonal", label: "Rechtwinklig / Bus" }
-          ], (value) => this._with((config) => { config.flow_routing = value as "curved" | "orthogonal"; }))}
+          ], (value) => this._with((config) => { config.flow_routing = value as "natural" | "orthogonal"; }))}
           ${this._selectInput("Optischer Stil", this._config.visual_style, [
             { value: "clean", label: "Clean – ruhiger und reduzierter" },
             { value: "classic", label: "Classic – stärkere Konturen/Schatten" }
           ], (value) => this._with((config) => { config.visual_style = value as "clean" | "classic"; }))}
+          ${this._selectInput("Informationsdichte im Live-Diagramm", this._config.live_detail, [
+            { value: "standard", label: "Standard – alle Unterzeilen" },
+            { value: "minimal", label: "Minimal – nur wichtige Zusatzinfos" }
+          ], (value) => this._with((config) => { config.live_detail = value as "standard" | "minimal"; }))}
+          ${this._checkbox("Aktive Komponenten stärker hervorheben", this._config.focus_active, true, (value) => this._with((config) => { config.focus_active = value; }))}
           ${this._checkbox("Legende anzeigen", this._config.show_legend, true, (value) => this._with((config) => { config.show_legend = value; }))}
           ${this._checkbox("Versionsnummer anzeigen", this._config.show_version, true, (value) => this._with((config) => { config.show_version = value; }))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },
             { value: "cards", label: "Karten" },
-            { value: "compact", label: "Kompakt" }
-          ], (value) => this._with((config) => { config.daily_layout = value as "auto" | "cards" | "compact"; }))}
+            { value: "compact", label: "Kompakt" },
+            { value: "strip", label: "Kennzahlenleiste – maximal reduziert" }
+          ], (value) => this._with((config) => { config.daily_layout = value as "auto" | "cards" | "compact" | "strip"; }))}
           ${this._textInput(
             "Tageskarten – Auswahl/Reihenfolge",
             (this._config.daily_items ?? []).join(", "),
-            "pv, grid-import, grid-export, house, autarky, self-consumption, import-cost, export-revenue",
+            "pv, house, grid-import, grid-export, autarky, self-consumption, self-supplied-energy, self-supply-savings",
             (value) => this._with((config) => {
               const items = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
               config.daily_items = items.length ? items as typeof config.daily_items : undefined;
             })
           )}
-          <div class="help">Leer = alle verfügbaren Tageswerte. Gültige Schlüssel: pv, grid-import, grid-export, house, autarky, self-consumption, import-price, export-price, import-cost, export-revenue.</div>
+          <div class="help">Leer = alle verfügbaren Tageswerte. Zusätzlich verfügbar: self-supplied-energy (Eigenversorgung PV+Batterie) und self-supply-savings (vermiedene Netzstromkosten).</div>
           ${this._checkbox("PV bei Nacht stärker ausblenden", this._config.night_mode, true, (value) => this._with((config) => { config.night_mode = value; }))}
         </section>
 
@@ -410,10 +416,11 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
             ${this._entityPicker("Aktuelle Einspeisevergütung", this._config.tariffs?.export_price, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, export_price: value }; }))}
             ${this._entityPicker("Netzkosten heute", this._config.tariffs?.import_cost_today, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, import_cost_today: value }; }))}
             ${this._entityPicker("Einspeiseerlös heute", this._config.tariffs?.export_revenue_today, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, export_revenue_today: value }; }))}
+            ${this._entityPicker("Eigenversorgungs-Ersparnis heute (optional)", this._config.tariffs?.self_supply_savings_today, (value) => this._with((config) => { config.tariffs = { ...config.tariffs, self_supply_savings_today: value }; }))}
             ${this._optionalNumberInput("Fester Bezugspreis [€/kWh]", this._config.tariffs?.fixed_import_price, "optional", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, fixed_import_price: value }; }), { min: 0, step: 0.001 })}
             ${this._optionalNumberInput("Feste Einspeisevergütung [€/kWh]", this._config.tariffs?.fixed_export_price, "optional", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, fixed_export_price: value }; }), { min: 0, step: 0.001 })}
             ${this._textInput("Währung", this._config.tariffs?.currency, "€", (value) => this._with((config) => { config.tariffs = { ...config.tariffs, currency: value }; }))}
-            <div class="help">Tageskosten werden bevorzugt aus eigenen Kosten-/Erlös-Entities gelesen. Mit festen Preisen kann die Card alternativ aus den Tages-kWh schätzen. Ein dynamischer aktueller Preis wird bewusst nicht rückwirkend auf den ganzen Tag angewendet.</div>
+            <div class="help">Eigenversorgung = Hausverbrauch minus Netzbezug. Die daraus vermiedenen Netzstromkosten werden bevorzugt aus einer eigenen Ersparnis-Entity gelesen; alternativ mit festem Bezugspreis berechnet. Bei dynamischen Preisen kann nur eine Näherung aus dem aktuellen bzw. bisherigen Durchschnittspreis erfolgen.</div>
           </div>
         </section>
 
