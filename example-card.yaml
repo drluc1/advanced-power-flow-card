@@ -20,6 +20,8 @@ live_detail: standard
 focus_active: true
 show_legend: true
 show_version: true
+show_live_kpis: true
+prominent_battery_soc: true
 daily_items:
   - pv
   - house

@@ -194,6 +194,8 @@ export interface AdvancedPowerFlowCardConfig {
   focus_active?: boolean;
   show_legend?: boolean;
   show_version?: boolean;
+  show_live_kpis?: boolean;
+  prominent_battery_soc?: boolean;
   night_mode?: boolean;
 }
 

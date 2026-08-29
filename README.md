@@ -426,3 +426,18 @@ daily_items:
   - grid-import
   - autarky
 ```
+
+## v0.3.6 – UI-Polish
+
+Die wichtigsten Live-Werte können jetzt oberhalb der Tagesstatistik deutlich hervorgehoben werden:
+
+```yaml
+show_live_kpis: true
+prominent_battery_soc: true
+```
+
+Die Live-KPI-Zeile zeigt die aktuelle PV-Gesamtleistung sowie für jede konfigurierte Batterie den SOC, aktuellen Batteriestatus und die momentane Lade-/Entladeleistung. Ein Klick auf eine Batterie in dieser Zeile öffnet die bereits vorhandene Batterie-Detailansicht.
+
+Zusätzlich zeigt die gruppierte PV-Kachel ihre momentane Gesamtleistung in der Gruppenüberschrift. In den Batterie-Kacheln steht der SOC groß rechts neben der aktuellen Leistung; der SOC-Balken bleibt als schnelle visuelle Füllstandsanzeige erhalten.
+
+Im `visual_style: clean` wurden Hintergründe und Rahmen weiter beruhigt. Diagnosehinweise werden als Warnung in einem dezenteren Gelb/Orange statt dominant rot dargestellt.

@@ -666,6 +666,8 @@ function normalizeConfig(input) {
 		focus_active: typeof raw.focus_active === "boolean" ? raw.focus_active : true,
 		show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
 		show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
+		show_live_kpis: typeof raw.show_live_kpis === "boolean" ? raw.show_live_kpis : true,
+		prominent_battery_soc: typeof raw.prominent_battery_soc === "boolean" ? raw.prominent_battery_soc : true,
 		daily_layout: raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "strip" || raw.daily_layout === "auto" ? raw.daily_layout : "cards",
 		daily_items: Array.isArray(raw.daily_items) ? raw.daily_items.filter((value) => typeof value === "string") : void 0,
 		night_mode: typeof raw.night_mode === "boolean" ? raw.night_mode : true
@@ -782,6 +784,8 @@ function createStubConfig() {
 		focus_active: true,
 		show_legend: true,
 		show_version: true,
+		show_live_kpis: true,
+		prominent_battery_soc: true,
 		daily_layout: "cards",
 		night_mode: true
 	};
@@ -1137,6 +1141,12 @@ var AdvancedPowerFlowCardEditor = class extends i {
 		}))}
           ${this._checkbox("Versionsnummer anzeigen", this._config.show_version, true, (value) => this._with((config) => {
 			config.show_version = value;
+		}))}
+          ${this._checkbox("Wichtige Live-Werte oben hervorheben", this._config.show_live_kpis, true, (value) => this._with((config) => {
+			config.show_live_kpis = value;
+		}))}
+          ${this._checkbox("Batterie-SOC in den Batterie-Kacheln groß anzeigen", this._config.prominent_battery_soc, true, (value) => this._with((config) => {
+			config.prominent_battery_soc = value;
 		}))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
@@ -1705,7 +1715,7 @@ if (!customElements.get("advanced-power-flow-card-editor")) customElements.defin
 //#endregion
 //#region src/advanced-power-flow-card.ts
 var CARD_NAME$1 = "Advanced Power Flow Card";
-var CARD_VERSION$1 = "0.3.5";
+var CARD_VERSION$1 = "0.3.6";
 var AdvancedPowerFlowCard = class extends i {
 	constructor(..._args) {
 		super(..._args);
@@ -2925,7 +2935,7 @@ var AdvancedPowerFlowCard = class extends i {
 						main: this._formatPower(battery.power, true),
 						sub: [
 							this._batteryStatus(battery),
-							this._formatSoc(battery.soc),
+							this._config.prominent_battery_soc === false ? this._formatSoc(battery.soc) : void 0,
 							this._batteryEtaNodeText(battery)
 						].filter(Boolean).join(" · "),
 						entity: battery.power ?? battery.soc,
@@ -3154,8 +3164,9 @@ var AdvancedPowerFlowCard = class extends i {
 		const clickable = Boolean(node.entity || node.heatPump || node.batteryIndex !== void 0 || node.pvSystemIndex !== void 0);
 		const activity = node.activity ?? "unknown";
 		const socTrackX = node.x + 14;
-		const socTrackY = node.y + node.h - 9;
+		const socTrackY = node.y + node.h - 11;
 		const socTrackW = Math.max(0, node.w - 28);
+		const prominentBatterySoc = node.kind === "battery" && node.batterySoc !== void 0 && this._config.prominent_battery_soc !== false;
 		const socFillW = node.batterySoc === void 0 ? 0 : socTrackW * node.batterySoc / 100;
 		return w`
       <g
@@ -3179,7 +3190,7 @@ var AdvancedPowerFlowCard = class extends i {
         ></rect>
         <text x=${node.x + 14} y=${titleY} class="node-title">
           <tspan class="node-icon">${icon[node.kind]}</tspan>
-          <tspan dx="8">${this._short(node.title, node.badge ? 20 : 28)}</tspan>
+          <tspan dx="8">${this._short(node.title, prominentBatterySoc ? 16 : node.badge ? 20 : 28)}</tspan>
         </text>
         ${node.badge ? w`
             <g class=${`status-badge ${node.badge.startsWith("⚠") ? "warning" : ""}`}>
@@ -3198,6 +3209,10 @@ var AdvancedPowerFlowCard = class extends i {
             </g>
           ` : A}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
+        ${prominentBatterySoc ? w`
+            <text x=${node.x + node.w - 14} y=${mainY - 15} text-anchor="end" class="battery-soc-label">SOC</text>
+            <text x=${node.x + node.w - 14} y=${mainY + 3} text-anchor="end" class="battery-soc-value">${Math.round(node.batterySoc ?? 0)} %</text>
+          ` : A}
         ${node.sub && (this._config.live_detail !== "minimal" || node.kind === "battery" || node.kind === "heat" || node.kind === "pv-parent") ? w`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>` : A}
         ${node.sub2 ? w`<text x=${node.x + 14} y=${subY + 17} class="node-sub node-sub-secondary">${this._short(node.sub2, 42)}</text>` : A}
         ${node.compactMppts?.length ? w`
@@ -3231,16 +3246,16 @@ var AdvancedPowerFlowCard = class extends i {
               x=${socTrackX}
               y=${socTrackY}
               width=${socTrackW}
-              height="4.5"
-              rx="2.25"
+              height="6"
+              rx="3"
               class="battery-soc-track"
             ></rect>
             <rect
               x=${socTrackX}
               y=${socTrackY}
               width=${socFillW}
-              height="4.5"
-              rx="2.25"
+              height="6"
+              rx="3"
               class="battery-soc-fill"
             ></rect>
             <line
@@ -3262,7 +3277,7 @@ var AdvancedPowerFlowCard = class extends i {
             <rect x=${socTrackX} y=${socTrackY} width=${socTrackW} height="4.5" rx="2.25" class="pv-node-share-track"></rect>
             <rect x=${socTrackX} y=${socTrackY} width=${socTrackW * node.pvShare / 100} height="4.5" rx="2.25" class="pv-node-share-fill"></rect>
           ` : A}
-        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : node.batteryIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>` : node.pvSystemIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>` : A}
+        ${node.heatPump ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>` : node.batteryIndex !== void 0 ? w`<text x=${node.x + node.w - 12} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>` : node.pvSystemIndex !== void 0 ? w`<text x=${node.x + node.w - 14} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>` : A}
       </g>
     `;
 	}
@@ -3894,6 +3909,7 @@ var AdvancedPowerFlowCard = class extends i {
 		const dailyItems = this._dailyItems();
 		const diagnostics = this._diagnosticMessages();
 		const dailyLayout = this._config.daily_layout ?? "auto";
+		const batteries = this._config.batteries ?? [];
 		const houseBranchIds = layout.bottom.filter((item) => item.source === "house").map((item) => item.node.id);
 		return b`
       <ha-card
@@ -3903,14 +3919,54 @@ var AdvancedPowerFlowCard = class extends i {
         <div class="header">
           <div>
             <div class="title">${this._config.title ?? "Energiefluss"}</div>
-            <div class="subtitle">
-              PV gesamt <strong>${this._formatW(pvTotal, true)}</strong>
-              <span class="separator">·</span>
-              ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
-            </div>
+            ${this._config.show_live_kpis === false ? b`<div class="subtitle">
+                  PV gesamt <strong>${this._formatW(pvTotal, true)}</strong>
+                  <span class="separator">·</span>
+                  ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
+                </div>` : A}
           </div>
           ${this._config.show_version === false ? A : b`<div class="version">v${CARD_VERSION$1}</div>`}
         </div>
+
+        ${this._config.show_live_kpis === false ? A : b`
+            <div class="live-kpis">
+              <div class="live-kpi live-kpi-pv">
+                <span class="live-kpi-icon">☀</span>
+                <div class="live-kpi-copy">
+                  <span>PV jetzt</span>
+                  <strong>${this._formatW(pvTotal, true)}</strong>
+                  <small>${(this._config.solar ?? []).length} System${(this._config.solar ?? []).length === 1 ? "" : "e"}</small>
+                </div>
+              </div>
+              ${batteries.map((battery, index) => {
+			const soc = this._clampPercent(this._number(battery.soc));
+			const status = this._batteryStatus(battery);
+			return b`
+                  <button
+                    class="live-kpi live-kpi-battery"
+                    @click=${() => {
+				const next = this._expandedBattery === index ? void 0 : index;
+				this._expandedBattery = next;
+				if (next !== void 0) {
+					this._heatExpanded = false;
+					this._pvDailyExpanded = false;
+					this._expandedPvSystem = void 0;
+					this._dailyBalanceExpanded = false;
+					this._diagnosticsExpanded = false;
+				}
+			}}
+                  >
+                    <span class="live-kpi-icon">▰</span>
+                    <div class="live-kpi-copy">
+                      <span>${battery.name ?? `Batterie ${index + 1}`}</span>
+                      <strong>${soc === void 0 ? "—" : `${Math.round(soc)} %`}</strong>
+                      <small>${status} · ${this._formatPower(battery.power, true)}</small>
+                    </div>
+                  </button>
+                `;
+		})}
+            </div>
+          `}
 
         ${dailyItems.length ? b`
             <div class=${`daily-summary daily-${dailyLayout}`}>
@@ -3981,6 +4037,12 @@ var AdvancedPowerFlowCard = class extends i {
                   y=${layout.pvGroup.y + 23}
                   class="pv-group-title"
                 >☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+                <text
+                  x=${layout.pvGroup.x + layout.pvGroup.width - 18}
+                  y=${layout.pvGroup.y + 23}
+                  text-anchor="end"
+                  class="pv-group-total"
+                >${this._formatW(pvTotal, true)}</text>
               ` : A}
 
             ${layout.batteryGroup ? w`
@@ -4206,6 +4268,88 @@ var AdvancedPowerFlowCard = class extends i {
       white-space: nowrap;
     }
 
+    .live-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
+    .live-kpi {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--divider-color);
+      border-radius: 13px;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      background: color-mix(in srgb, var(--secondary-background-color) 42%, transparent);
+    }
+
+    button.live-kpi { cursor: pointer; }
+    button.live-kpi:hover { filter: brightness(1.03); }
+
+    .live-kpi-pv {
+      border-color: color-mix(in srgb, var(--apfc-solar) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-solar) 6%, var(--card-background-color));
+    }
+
+    .live-kpi-battery {
+      border-color: color-mix(in srgb, var(--apfc-battery) 34%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-battery) 5%, var(--card-background-color));
+    }
+
+    .live-kpi-icon {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      font-size: 19px;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+    }
+
+    .live-kpi-pv .live-kpi-icon { color: var(--apfc-solar); }
+    .live-kpi-battery .live-kpi-icon { color: var(--apfc-battery); }
+
+    .live-kpi-copy {
+      min-width: 0;
+      display: grid;
+      line-height: 1.08;
+    }
+
+    .live-kpi-copy > span {
+      color: var(--secondary-text-color);
+      font-size: max(11px, calc(var(--apfc-subtitle-size) * .75));
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .live-kpi-copy strong {
+      margin-top: 3px;
+      color: var(--primary-text-color);
+      font-size: max(20px, calc(var(--apfc-node-main-size) * .88));
+      font-weight: 800;
+      letter-spacing: -.2px;
+      white-space: nowrap;
+    }
+
+    .live-kpi-copy small {
+      margin-top: 3px;
+      color: var(--secondary-text-color);
+      font-size: max(9.5px, calc(var(--apfc-node-sub-size) * .72));
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .daily-summary {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
@@ -4292,6 +4436,12 @@ var AdvancedPowerFlowCard = class extends i {
       font-weight: 650;
     }
 
+    .pv-group-total {
+      fill: color-mix(in srgb, var(--apfc-solar) 78%, var(--primary-text-color));
+      font-size: max(14px, calc(var(--apfc-node-main-size) * .70));
+      font-weight: 820;
+    }
+
     .diagram-group-bg {
       fill: color-mix(in srgb, var(--secondary-background-color) 76%, transparent);
       stroke-width: 1.1;
@@ -4308,8 +4458,8 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .diagram-group-title {
-      font-size: max(11px, calc(var(--apfc-node-sub-size) * .88));
-      font-weight: 650;
+      font-size: max(12px, calc(var(--apfc-node-sub-size) * .94));
+      font-weight: 720;
       fill: var(--secondary-text-color);
     }
 
@@ -4329,7 +4479,7 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .compact-mppt-label.warning {
-      fill: var(--error-color, #db4437);
+      fill: var(--warning-color, #f4b400);
     }
 
     .compact-mppt-value {
@@ -4410,13 +4560,13 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .node.warning .node-bg {
-      stroke: var(--error-color, #db4437);
+      stroke: var(--warning-color, #f4b400);
       stroke-width: 2.2;
-      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--error-color, #db4437) 18%, transparent));
+      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--warning-color, #f4b400) 18%, transparent));
     }
 
     .node.warning .node-sub {
-      fill: var(--error-color, #db4437);
+      fill: var(--warning-color, #f4b400);
       font-weight: 700;
     }
 
@@ -4513,18 +4663,31 @@ var AdvancedPowerFlowCard = class extends i {
       font-weight: 750;
     }
 
+    .battery-soc-label {
+      fill: var(--secondary-text-color);
+      font-size: max(8.5px, calc(var(--apfc-node-sub-size) * .66));
+      font-weight: 650;
+      letter-spacing: .45px;
+    }
+
+    .battery-soc-value {
+      fill: color-mix(in srgb, var(--apfc-battery) 80%, var(--primary-text-color));
+      font-size: max(16px, calc(var(--apfc-node-main-size) * .72));
+      font-weight: 850;
+    }
+
     .node-sub {
       fill: var(--secondary-text-color);
       font-size: var(--apfc-node-sub-size);
     }
 
     .battery-soc-track {
-      fill: color-mix(in srgb, var(--secondary-text-color) 18%, transparent);
+      fill: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
     }
 
     .battery-soc-fill {
       fill: var(--apfc-battery);
-      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 35%, transparent));
+      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 28%, transparent));
     }
 
     .battery-soc-mark {
@@ -4573,12 +4736,12 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .status-badge.warning rect {
-      fill: color-mix(in srgb, var(--error-color, #db4437) 15%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--error-color, #db4437) 55%, var(--divider-color));
+      fill: color-mix(in srgb, var(--warning-color, #f4b400) 15%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--warning-color, #f4b400) 55%, var(--divider-color));
     }
 
     .status-badge.warning text {
-      fill: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
+      fill: color-mix(in srgb, var(--warning-color, #f4b400) 82%, var(--primary-text-color));
     }
 
     .node.idle .status-badge,
@@ -4635,7 +4798,27 @@ var AdvancedPowerFlowCard = class extends i {
     ha-card.visual-clean .cluster-bg,
     ha-card.visual-clean .pv-group-bg,
     ha-card.visual-clean .diagram-group-bg {
-      stroke-width: .9;
+      stroke-width: .8;
+    }
+
+    ha-card.visual-clean .pv-group-bg {
+      fill: color-mix(in srgb, var(--secondary-background-color) 78%, transparent);
+      stroke: color-mix(in srgb, var(--apfc-solar) 18%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .node-bg.pv-parent {
+      fill: color-mix(in srgb, var(--apfc-solar) 7%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 48%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .node-bg.battery {
+      fill: color-mix(in srgb, var(--apfc-battery) 5%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-battery) 34%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .battery-group-bg,
+    ha-card.visual-clean .consumer-group-bg {
+      fill: color-mix(in srgb, var(--secondary-background-color) 72%, transparent);
     }
 
     ha-card.visual-clean .node.idle:not(.warning) {
@@ -4915,11 +5098,11 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .diagnostic-summary-button {
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 42%, var(--divider-color));
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 42%, var(--divider-color));
       border-radius: 999px;
       padding: 4px 8px;
-      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
-      color: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 8%, transparent);
+      color: color-mix(in srgb, var(--warning-color, #f4b400) 82%, var(--primary-text-color));
       font: inherit;
       cursor: pointer;
     }
@@ -4936,8 +5119,8 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .detail-warning {
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 38%, var(--divider-color));
-      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 8%, transparent);
     }
 
     .detail-ok {
@@ -4955,7 +5138,7 @@ var AdvancedPowerFlowCard = class extends i {
       border-radius: 11px;
       background: var(--card-background-color);
     }
-    .mppt-detail-row.warning { border-color: color-mix(in srgb, var(--error-color, #db4437) 50%, var(--divider-color)); }
+    .mppt-detail-row.warning { border-color: color-mix(in srgb, var(--warning-color, #f4b400) 50%, var(--divider-color)); }
     .mppt-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
     .mppt-detail-head > div { display: grid; gap: 2px; }
     .mppt-detail-head strong { font-size: 14px; }
@@ -5074,8 +5257,8 @@ var AdvancedPowerFlowCard = class extends i {
     }
 
     .daily-balance-residual.warning {
-      border-color: color-mix(in srgb, var(--error-color, #db4437) 45%, var(--divider-color));
-      background: color-mix(in srgb, var(--error-color, #db4437) 7%, transparent);
+      border-color: color-mix(in srgb, var(--warning-color, #f4b400) 45%, var(--divider-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 7%, transparent);
     }
 
     .detail-note {
@@ -5106,7 +5289,7 @@ var AdvancedPowerFlowCard = class extends i {
       align-items: center;
       gap: 12px;
       padding: 10px 12px;
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 30%, var(--divider-color));
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 30%, var(--divider-color));
       border-radius: 10px;
       background: var(--card-background-color);
     }
@@ -5158,6 +5341,12 @@ var AdvancedPowerFlowCard = class extends i {
       .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
       .daily-summary.daily-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .daily-summary.daily-strip .daily-item { min-height: 48px; padding: 6px 8px; }
+      .daily-summary.daily-strip .daily-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+      .live-kpis { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 6px; margin-bottom: 8px; }
+      .live-kpi { min-height: 58px; padding: 7px 8px; gap: 7px; }
+      .live-kpi-icon { width: 24px; height: 24px; font-size: 16px; border-radius: 8px; }
+      .live-kpi-copy strong { font-size: max(18px, calc(var(--apfc-node-main-size) * .78)); }
+      .title { font-size: min(var(--apfc-title-size), 32px); }
       .self-supply-card { grid-template-columns: 1fr 1fr; padding: 10px; }
       .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
       .daily-balance-columns { grid-template-columns: 1fr; }

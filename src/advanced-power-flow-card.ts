@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const CARD_NAME = "Advanced Power Flow Card";
-const CARD_VERSION = "0.3.5";
+const CARD_VERSION = "0.3.6";
 
 type FlowDirection = "forward" | "reverse" | "off";
 type NodeActivity = "active" | "idle" | "unknown";
@@ -1748,7 +1748,7 @@ export class AdvancedPowerFlowCard extends LitElement {
             main: this._formatPower(battery.power, true),
             sub: [
               this._batteryStatus(battery),
-              this._formatSoc(battery.soc),
+              this._config.prominent_battery_soc === false ? this._formatSoc(battery.soc) : undefined,
               this._batteryEtaNodeText(battery)
             ].filter(Boolean).join(" · "),
             entity: battery.power ?? battery.soc,
@@ -2035,8 +2035,9 @@ export class AdvancedPowerFlowCard extends LitElement {
     const clickable = Boolean(node.entity || node.heatPump || node.batteryIndex !== undefined || node.pvSystemIndex !== undefined);
     const activity = node.activity ?? "unknown";
     const socTrackX = node.x + 14;
-    const socTrackY = node.y + node.h - 9;
+    const socTrackY = node.y + node.h - 11;
     const socTrackW = Math.max(0, node.w - 28);
+    const prominentBatterySoc = node.kind === "battery" && node.batterySoc !== undefined && this._config.prominent_battery_soc !== false;
     const socFillW = node.batterySoc === undefined
       ? 0
       : socTrackW * node.batterySoc / 100;
@@ -2059,7 +2060,7 @@ export class AdvancedPowerFlowCard extends LitElement {
         ></rect>
         <text x=${node.x + 14} y=${titleY} class="node-title">
           <tspan class="node-icon">${icon[node.kind]}</tspan>
-          <tspan dx="8">${this._short(node.title, node.badge ? 20 : 28)}</tspan>
+          <tspan dx="8">${this._short(node.title, prominentBatterySoc ? 16 : node.badge ? 20 : 28)}</tspan>
         </text>
         ${node.badge
           ? svg`
@@ -2080,6 +2081,12 @@ export class AdvancedPowerFlowCard extends LitElement {
           `
           : nothing}
         <text x=${node.x + 14} y=${mainY} class="node-main">${node.main}</text>
+        ${prominentBatterySoc
+          ? svg`
+            <text x=${node.x + node.w - 14} y=${mainY - 15} text-anchor="end" class="battery-soc-label">SOC</text>
+            <text x=${node.x + node.w - 14} y=${mainY + 3} text-anchor="end" class="battery-soc-value">${Math.round(node.batterySoc ?? 0)} %</text>
+          `
+          : nothing}
         ${node.sub && (this._config.live_detail !== "minimal" || node.kind === "battery" || node.kind === "heat" || node.kind === "pv-parent")
           ? svg`<text x=${node.x + 14} y=${subY} class="node-sub">${this._short(node.sub, node.kind === "pv-parent" ? 42 : 34)}</text>`
           : nothing}
@@ -2122,16 +2129,16 @@ export class AdvancedPowerFlowCard extends LitElement {
               x=${socTrackX}
               y=${socTrackY}
               width=${socTrackW}
-              height="4.5"
-              rx="2.25"
+              height="6"
+              rx="3"
               class="battery-soc-track"
             ></rect>
             <rect
               x=${socTrackX}
               y=${socTrackY}
               width=${socFillW}
-              height="4.5"
-              rx="2.25"
+              height="6"
+              rx="3"
               class="battery-soc-fill"
             ></rect>
             <line
@@ -2159,7 +2166,7 @@ export class AdvancedPowerFlowCard extends LitElement {
         ${node.heatPump
           ? svg`<text x=${node.x + node.w - 14} y=${node.y + node.h - 12} text-anchor="end" class="node-action">${this._heatExpanded ? "▲" : "▼"}</text>`
           : node.batteryIndex !== undefined
-            ? svg`<text x=${node.x + node.w - 14} y=${node.y + 27} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>`
+            ? svg`<text x=${node.x + node.w - 12} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedBattery === node.batteryIndex ? "▲" : "▼"}</text>`
             : node.pvSystemIndex !== undefined
               ? svg`<text x=${node.x + node.w - 14} y=${node.y + node.h - 18} text-anchor="end" class="node-action">${this._expandedPvSystem === node.pvSystemIndex ? "▲" : "▼"}</text>`
               : nothing}
@@ -2943,6 +2950,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     const dailyItems = this._dailyItems();
     const diagnostics = this._diagnosticMessages();
     const dailyLayout = this._config.daily_layout ?? "auto";
+    const batteries = this._config.batteries ?? [];
     const houseBranchIds = layout.bottom
       .filter((item) => item.source === "house")
       .map((item) => item.node.id);
@@ -2955,14 +2963,58 @@ export class AdvancedPowerFlowCard extends LitElement {
         <div class="header">
           <div>
             <div class="title">${this._config.title ?? "Energiefluss"}</div>
-            <div class="subtitle">
-              PV gesamt <strong>${this._formatW(pvTotal, true)}</strong>
-              <span class="separator">·</span>
-              ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
-            </div>
+            ${this._config.show_live_kpis === false
+              ? html`<div class="subtitle">
+                  PV gesamt <strong>${this._formatW(pvTotal, true)}</strong>
+                  <span class="separator">·</span>
+                  ${(this._config.solar ?? []).length} PV-System${(this._config.solar ?? []).length === 1 ? "" : "e"}
+                </div>`
+              : nothing}
           </div>
           ${this._config.show_version === false ? nothing : html`<div class="version">v${CARD_VERSION}</div>`}
         </div>
+
+        ${this._config.show_live_kpis === false
+          ? nothing
+          : html`
+            <div class="live-kpis">
+              <div class="live-kpi live-kpi-pv">
+                <span class="live-kpi-icon">☀</span>
+                <div class="live-kpi-copy">
+                  <span>PV jetzt</span>
+                  <strong>${this._formatW(pvTotal, true)}</strong>
+                  <small>${(this._config.solar ?? []).length} System${(this._config.solar ?? []).length === 1 ? "" : "e"}</small>
+                </div>
+              </div>
+              ${batteries.map((battery, index) => {
+                const soc = this._clampPercent(this._number(battery.soc));
+                const status = this._batteryStatus(battery);
+                return html`
+                  <button
+                    class="live-kpi live-kpi-battery"
+                    @click=${() => {
+                      const next = this._expandedBattery === index ? undefined : index;
+                      this._expandedBattery = next;
+                      if (next !== undefined) {
+                        this._heatExpanded = false;
+                        this._pvDailyExpanded = false;
+                        this._expandedPvSystem = undefined;
+                        this._dailyBalanceExpanded = false;
+                        this._diagnosticsExpanded = false;
+                      }
+                    }}
+                  >
+                    <span class="live-kpi-icon">▰</span>
+                    <div class="live-kpi-copy">
+                      <span>${battery.name ?? `Batterie ${index + 1}`}</span>
+                      <strong>${soc === undefined ? "—" : `${Math.round(soc)} %`}</strong>
+                      <small>${status} · ${this._formatPower(battery.power, true)}</small>
+                    </div>
+                  </button>
+                `;
+              })}
+            </div>
+          `}
 
         ${dailyItems.length
           ? html`
@@ -3036,6 +3088,12 @@ export class AdvancedPowerFlowCard extends LitElement {
                   y=${layout.pvGroup.y + 23}
                   class="pv-group-title"
                 >☀ PV-Anlagen · ${(this._config.solar ?? []).length} Systeme</text>
+                <text
+                  x=${layout.pvGroup.x + layout.pvGroup.width - 18}
+                  y=${layout.pvGroup.y + 23}
+                  text-anchor="end"
+                  class="pv-group-total"
+                >${this._formatW(pvTotal, true)}</text>
               `
               : nothing}
 
@@ -3328,6 +3386,88 @@ export class AdvancedPowerFlowCard extends LitElement {
       white-space: nowrap;
     }
 
+    .live-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
+    .live-kpi {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--divider-color);
+      border-radius: 13px;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      background: color-mix(in srgb, var(--secondary-background-color) 42%, transparent);
+    }
+
+    button.live-kpi { cursor: pointer; }
+    button.live-kpi:hover { filter: brightness(1.03); }
+
+    .live-kpi-pv {
+      border-color: color-mix(in srgb, var(--apfc-solar) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-solar) 6%, var(--card-background-color));
+    }
+
+    .live-kpi-battery {
+      border-color: color-mix(in srgb, var(--apfc-battery) 34%, var(--divider-color));
+      background: color-mix(in srgb, var(--apfc-battery) 5%, var(--card-background-color));
+    }
+
+    .live-kpi-icon {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      font-size: 19px;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+    }
+
+    .live-kpi-pv .live-kpi-icon { color: var(--apfc-solar); }
+    .live-kpi-battery .live-kpi-icon { color: var(--apfc-battery); }
+
+    .live-kpi-copy {
+      min-width: 0;
+      display: grid;
+      line-height: 1.08;
+    }
+
+    .live-kpi-copy > span {
+      color: var(--secondary-text-color);
+      font-size: max(11px, calc(var(--apfc-subtitle-size) * .75));
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .live-kpi-copy strong {
+      margin-top: 3px;
+      color: var(--primary-text-color);
+      font-size: max(20px, calc(var(--apfc-node-main-size) * .88));
+      font-weight: 800;
+      letter-spacing: -.2px;
+      white-space: nowrap;
+    }
+
+    .live-kpi-copy small {
+      margin-top: 3px;
+      color: var(--secondary-text-color);
+      font-size: max(9.5px, calc(var(--apfc-node-sub-size) * .72));
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .daily-summary {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
@@ -3414,6 +3554,12 @@ export class AdvancedPowerFlowCard extends LitElement {
       font-weight: 650;
     }
 
+    .pv-group-total {
+      fill: color-mix(in srgb, var(--apfc-solar) 78%, var(--primary-text-color));
+      font-size: max(14px, calc(var(--apfc-node-main-size) * .70));
+      font-weight: 820;
+    }
+
     .diagram-group-bg {
       fill: color-mix(in srgb, var(--secondary-background-color) 76%, transparent);
       stroke-width: 1.1;
@@ -3430,8 +3576,8 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .diagram-group-title {
-      font-size: max(11px, calc(var(--apfc-node-sub-size) * .88));
-      font-weight: 650;
+      font-size: max(12px, calc(var(--apfc-node-sub-size) * .94));
+      font-weight: 720;
       fill: var(--secondary-text-color);
     }
 
@@ -3451,7 +3597,7 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .compact-mppt-label.warning {
-      fill: var(--error-color, #db4437);
+      fill: var(--warning-color, #f4b400);
     }
 
     .compact-mppt-value {
@@ -3532,13 +3678,13 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .node.warning .node-bg {
-      stroke: var(--error-color, #db4437);
+      stroke: var(--warning-color, #f4b400);
       stroke-width: 2.2;
-      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--error-color, #db4437) 18%, transparent));
+      filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--warning-color, #f4b400) 18%, transparent));
     }
 
     .node.warning .node-sub {
-      fill: var(--error-color, #db4437);
+      fill: var(--warning-color, #f4b400);
       font-weight: 700;
     }
 
@@ -3635,18 +3781,31 @@ export class AdvancedPowerFlowCard extends LitElement {
       font-weight: 750;
     }
 
+    .battery-soc-label {
+      fill: var(--secondary-text-color);
+      font-size: max(8.5px, calc(var(--apfc-node-sub-size) * .66));
+      font-weight: 650;
+      letter-spacing: .45px;
+    }
+
+    .battery-soc-value {
+      fill: color-mix(in srgb, var(--apfc-battery) 80%, var(--primary-text-color));
+      font-size: max(16px, calc(var(--apfc-node-main-size) * .72));
+      font-weight: 850;
+    }
+
     .node-sub {
       fill: var(--secondary-text-color);
       font-size: var(--apfc-node-sub-size);
     }
 
     .battery-soc-track {
-      fill: color-mix(in srgb, var(--secondary-text-color) 18%, transparent);
+      fill: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
     }
 
     .battery-soc-fill {
       fill: var(--apfc-battery);
-      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 35%, transparent));
+      filter: drop-shadow(0 0 1px color-mix(in srgb, var(--apfc-battery) 28%, transparent));
     }
 
     .battery-soc-mark {
@@ -3695,12 +3854,12 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .status-badge.warning rect {
-      fill: color-mix(in srgb, var(--error-color, #db4437) 15%, var(--card-background-color));
-      stroke: color-mix(in srgb, var(--error-color, #db4437) 55%, var(--divider-color));
+      fill: color-mix(in srgb, var(--warning-color, #f4b400) 15%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--warning-color, #f4b400) 55%, var(--divider-color));
     }
 
     .status-badge.warning text {
-      fill: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
+      fill: color-mix(in srgb, var(--warning-color, #f4b400) 82%, var(--primary-text-color));
     }
 
     .node.idle .status-badge,
@@ -3757,7 +3916,27 @@ export class AdvancedPowerFlowCard extends LitElement {
     ha-card.visual-clean .cluster-bg,
     ha-card.visual-clean .pv-group-bg,
     ha-card.visual-clean .diagram-group-bg {
-      stroke-width: .9;
+      stroke-width: .8;
+    }
+
+    ha-card.visual-clean .pv-group-bg {
+      fill: color-mix(in srgb, var(--secondary-background-color) 78%, transparent);
+      stroke: color-mix(in srgb, var(--apfc-solar) 18%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .node-bg.pv-parent {
+      fill: color-mix(in srgb, var(--apfc-solar) 7%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-solar) 48%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .node-bg.battery {
+      fill: color-mix(in srgb, var(--apfc-battery) 5%, var(--card-background-color));
+      stroke: color-mix(in srgb, var(--apfc-battery) 34%, var(--divider-color));
+    }
+
+    ha-card.visual-clean .battery-group-bg,
+    ha-card.visual-clean .consumer-group-bg {
+      fill: color-mix(in srgb, var(--secondary-background-color) 72%, transparent);
     }
 
     ha-card.visual-clean .node.idle:not(.warning) {
@@ -4037,11 +4216,11 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .diagnostic-summary-button {
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 42%, var(--divider-color));
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 42%, var(--divider-color));
       border-radius: 999px;
       padding: 4px 8px;
-      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
-      color: color-mix(in srgb, var(--error-color, #db4437) 82%, var(--primary-text-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 8%, transparent);
+      color: color-mix(in srgb, var(--warning-color, #f4b400) 82%, var(--primary-text-color));
       font: inherit;
       cursor: pointer;
     }
@@ -4058,8 +4237,8 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .detail-warning {
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 38%, var(--divider-color));
-      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 38%, var(--divider-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 8%, transparent);
     }
 
     .detail-ok {
@@ -4077,7 +4256,7 @@ export class AdvancedPowerFlowCard extends LitElement {
       border-radius: 11px;
       background: var(--card-background-color);
     }
-    .mppt-detail-row.warning { border-color: color-mix(in srgb, var(--error-color, #db4437) 50%, var(--divider-color)); }
+    .mppt-detail-row.warning { border-color: color-mix(in srgb, var(--warning-color, #f4b400) 50%, var(--divider-color)); }
     .mppt-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
     .mppt-detail-head > div { display: grid; gap: 2px; }
     .mppt-detail-head strong { font-size: 14px; }
@@ -4196,8 +4375,8 @@ export class AdvancedPowerFlowCard extends LitElement {
     }
 
     .daily-balance-residual.warning {
-      border-color: color-mix(in srgb, var(--error-color, #db4437) 45%, var(--divider-color));
-      background: color-mix(in srgb, var(--error-color, #db4437) 7%, transparent);
+      border-color: color-mix(in srgb, var(--warning-color, #f4b400) 45%, var(--divider-color));
+      background: color-mix(in srgb, var(--warning-color, #f4b400) 7%, transparent);
     }
 
     .detail-note {
@@ -4228,7 +4407,7 @@ export class AdvancedPowerFlowCard extends LitElement {
       align-items: center;
       gap: 12px;
       padding: 10px 12px;
-      border: 1px solid color-mix(in srgb, var(--error-color, #db4437) 30%, var(--divider-color));
+      border: 1px solid color-mix(in srgb, var(--warning-color, #f4b400) 30%, var(--divider-color));
       border-radius: 10px;
       background: var(--card-background-color);
     }
@@ -4280,6 +4459,12 @@ export class AdvancedPowerFlowCard extends LitElement {
       .daily-summary.daily-auto .daily-item strong { font-size: 12.5px; }
       .daily-summary.daily-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .daily-summary.daily-strip .daily-item { min-height: 48px; padding: 6px 8px; }
+      .daily-summary.daily-strip .daily-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+      .live-kpis { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 6px; margin-bottom: 8px; }
+      .live-kpi { min-height: 58px; padding: 7px 8px; gap: 7px; }
+      .live-kpi-icon { width: 24px; height: 24px; font-size: 16px; border-radius: 8px; }
+      .live-kpi-copy strong { font-size: max(18px, calc(var(--apfc-node-main-size) * .78)); }
+      .title { font-size: min(var(--apfc-title-size), 32px); }
       .self-supply-card { grid-template-columns: 1fr 1fr; padding: 10px; }
       .detail-warning, .detail-ok { flex-direction: column; gap: 3px; }
       .daily-balance-columns { grid-template-columns: 1fr; }

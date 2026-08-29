@@ -250,6 +250,8 @@ export class AdvancedPowerFlowCardEditor extends LitElement {
           ${this._checkbox("Aktive Komponenten stärker hervorheben", this._config.focus_active, true, (value) => this._with((config) => { config.focus_active = value; }))}
           ${this._checkbox("Legende anzeigen", this._config.show_legend, true, (value) => this._with((config) => { config.show_legend = value; }))}
           ${this._checkbox("Versionsnummer anzeigen", this._config.show_version, true, (value) => this._with((config) => { config.show_version = value; }))}
+          ${this._checkbox("Wichtige Live-Werte oben hervorheben", this._config.show_live_kpis, true, (value) => this._with((config) => { config.show_live_kpis = value; }))}
+          ${this._checkbox("Batterie-SOC in den Batterie-Kacheln groß anzeigen", this._config.prominent_battery_soc, true, (value) => this._with((config) => { config.prominent_battery_soc = value; }))}
           <div class="help">Mobile Skalierung wirkt nur auf kleinen Displays. 1,06 entspricht +6 %; Werte bis 1,30 sind möglich.</div>
           ${this._selectInput("Tageswerte-Layout", this._config.daily_layout, [
             { value: "auto", label: "Automatisch (mobil kompakt)" },

@@ -1,3 +1,14 @@
+## 0.3.6
+
+- UI-Polish mit neuer Live-KPI-Zeile für aktuelle PV-Leistung und Batterie-SOC.
+- Batterie-SOC wird zusätzlich direkt in den Batterie-Kacheln groß hervorgehoben; Lade-/Entladestatus und Restlaufzeit bleiben als Unterzeile erhalten.
+- Die gemeinsame PV-Gruppe zeigt ihre Gesamtleistung zusätzlich prominent in der Gruppenüberschrift.
+- Tages-Kennzahlenleiste nutzt bei einer ungeraden Anzahl von Werten auf Mobilgeräten die letzte Zeile vollständig statt eines leeren Feldes.
+- Clean-Stil weiter reduziert: neutralere Gruppenflächen, dezentere PV-/Batterie-Füllungen und klarere visuelle Hierarchie.
+- Diagnosehinweise verwenden im Live-Dashboard jetzt einen ruhigeren Warnfarbton statt einer dominanten roten Darstellung.
+- Gruppentitel wurden besser lesbar gemacht; der mobile Haupttitel wird bei sehr hoher Skalierung begrenzt.
+- Neue Optionen `show_live_kpis` und `prominent_battery_soc`, beide standardmäßig aktiviert.
+
 ## 0.3.5
 
 - Untere Batterie-/Verbraucher-Verbindungen auf direkte, natürliche S-Kurven ohne seitliche Bus-Umwege umgestellt.

@@ -158,6 +158,8 @@ export function normalizeConfig(input: unknown): AdvancedPowerFlowCardConfig {
     focus_active: typeof raw.focus_active === "boolean" ? raw.focus_active : true,
     show_legend: typeof raw.show_legend === "boolean" ? raw.show_legend : true,
     show_version: typeof raw.show_version === "boolean" ? raw.show_version : true,
+    show_live_kpis: typeof raw.show_live_kpis === "boolean" ? raw.show_live_kpis : true,
+    prominent_battery_soc: typeof raw.prominent_battery_soc === "boolean" ? raw.prominent_battery_soc : true,
     daily_layout:
       raw.daily_layout === "cards" || raw.daily_layout === "compact" || raw.daily_layout === "strip" || raw.daily_layout === "auto"
         ? raw.daily_layout
@@ -248,6 +250,8 @@ export function createStubConfig(): AdvancedPowerFlowCardConfig {
     focus_active: true,
     show_legend: true,
     show_version: true,
+    show_live_kpis: true,
+    prominent_battery_soc: true,
     daily_layout: "cards",
     night_mode: true
   };
